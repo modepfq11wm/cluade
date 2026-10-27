@@ -64,12 +64,13 @@ async function callClaude(text, abortCtrl) {
 
   let accText = '', accThink = '';
   try {
+    const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     for await (const ev of query({
       prompt: text,
       options: {
         abortController: abortCtrl,
         resume: kkSessionId || undefined,
-        systemPrompt: SYSTEM,
+        systemPrompt: `${SYSTEM}\n\n当前时间：${now}`,
         model: MODEL,
         tools: [],
         settingSources: [],
