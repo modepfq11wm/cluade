@@ -1609,7 +1609,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 </header>
 
 <div id="log"></div>
-<div id="pet" title="他在这儿"><img id="petImg" src="pet/clawd-idle-follow.svg" alt=""></div>
+<div id="pet" title="他在这儿"><img id="petImg" alt=""></div>
 
 <footer>
   <div id="doingLine"><span class="pill"><span class="w"></span><span class="en"></span><span class="t"></span></span></div>
@@ -2139,24 +2139,47 @@ const log = document.getElementById('log');
 const box = document.getElementById('box');
 const sendBtn = document.getElementById('send');
 
-/* ---------- 小螃蟹 ---------- */
+/* ---------- 小猫 ---------- */
 const petImg = document.getElementById('petImg');
+function _svgUri(s) { return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(s))); }
+function _cat(eyes, extra) {
+  return _svgUri('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    + '<circle cx="50" cy="58" r="32" fill="rgb(245,228,208)"/>'
+    + '<polygon points="22,32 14,8 38,26" fill="rgb(245,228,208)"/>'
+    + '<polygon points="78,32 86,8 62,26" fill="rgb(245,228,208)"/>'
+    + '<polygon points="23,30 17,12 36,25" fill="rgb(244,184,200)"/>'
+    + '<polygon points="77,30 83,12 64,25" fill="rgb(244,184,200)"/>'
+    + eyes
+    + '<ellipse cx="50" cy="65" rx="4" ry="3" fill="rgb(244,184,200)"/>'
+    + (extra || '')
+    + '<line x1="8" y1="62" x2="34" y2="64" stroke="rgb(43,42,39)" stroke-width="1.2" opacity="0.35"/>'
+    + '<line x1="8" y1="68" x2="34" y2="68" stroke="rgb(43,42,39)" stroke-width="1.2" opacity="0.35"/>'
+    + '<line x1="66" y1="64" x2="92" y2="62" stroke="rgb(43,42,39)" stroke-width="1.2" opacity="0.35"/>'
+    + '<line x1="66" y1="68" x2="92" y2="68" stroke="rgb(43,42,39)" stroke-width="1.2" opacity="0.35"/>'
+    + '</svg>');
+}
+const _EN = '<ellipse cx="38" cy="55" rx="6" ry="7" fill="rgb(43,42,39)"/><ellipse cx="62" cy="55" rx="6" ry="7" fill="rgb(43,42,39)"/><circle cx="40" cy="53" r="2.5" fill="white"/><circle cx="64" cy="53" r="2.5" fill="white"/><path d="M44,70 Q50,76 56,70" stroke="rgb(43,42,39)" stroke-width="2" fill="none" stroke-linecap="round"/>';
+const _EH = '<path d="M32,52 Q38,46 44,52" stroke="rgb(43,42,39)" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M56,52 Q62,46 68,52" stroke="rgb(43,42,39)" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M44,70 Q50,76 56,70" stroke="rgb(43,42,39)" stroke-width="2" fill="none" stroke-linecap="round"/>';
+const _ED = '<path d="M31,55 Q38,58 45,55" stroke="rgb(43,42,39)" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M55,55 Q62,58 69,55" stroke="rgb(43,42,39)" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M44,70 Q50,74 56,70" stroke="rgb(43,42,39)" stroke-width="2" fill="none" stroke-linecap="round"/>';
+const _ES = '<path d="M31,56 Q38,60 45,56" stroke="rgb(43,42,39)" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M55,56 Q62,60 69,56" stroke="rgb(43,42,39)" stroke-width="3" fill="none" stroke-linecap="round"/>';
+const _EB = '<ellipse cx="38" cy="54" rx="8" ry="9" fill="rgb(43,42,39)"/><ellipse cx="62" cy="54" rx="8" ry="9" fill="rgb(43,42,39)"/><circle cx="41" cy="51" r="3" fill="white"/><circle cx="65" cy="51" r="3" fill="white"/><path d="M44,70 Q50,76 56,70" stroke="rgb(43,42,39)" stroke-width="2" fill="none" stroke-linecap="round"/>';
 const PET = {
-  idle: 'clawd-idle-follow.svg',
-  thinking: 'clawd-working-thinking.svg',
-  typing: 'clawd-working-typing.svg',
-  happy: 'clawd-happy.svg',
-  doze: 'clawd-idle-doze.svg',
-  sleeping: 'clawd-sleeping.svg',
-  react: 'clawd-react-double-jump.svg',
+  idle:     _cat(_EN),
+  thinking: _cat(_EN, '<text x="66" y="36" font-size="15" fill="rgb(200,196,190)" font-family="sans-serif">?</text>'),
+  typing:   _cat(_EN),
+  happy:    _cat(_EH),
+  doze:     _cat(_ED),
+  sleeping: _cat(_ES, '<text x="62" y="38" font-size="16" fill="rgb(200,196,190)" font-family="sans-serif">z</text><text x="70" y="28" font-size="12" fill="rgb(200,196,190)" font-family="sans-serif">z</text>'),
+  react:    _cat(_EB),
 };
+petImg.src = PET.idle;
 let petState = 'idle';
 let petTimer = null;
 let lastEventAt = Date.now();
 function petSet(state, holdMs) {
   if (petState === state && !holdMs) return;
   petState = state;
-  petImg.src = 'pet/' + (PET[state] || PET.idle);
+  petImg.src = PET[state] || PET.idle;
   if (petTimer) { clearTimeout(petTimer); petTimer = null; }
   if (holdMs) petTimer = setTimeout(() => petSet('idle'), holdMs);
 }
