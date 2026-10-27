@@ -69,7 +69,7 @@ async function callClaude(text, abortCtrl) {
       options: {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
-        systemPrompt: `${SYSTEM}\n\n当前时间：${now}\n\n以上关于月月的信息是你早就知道的，已经融进去了，不要主动说出来，更不要像在背档案一样列举。自然说话就好。`,
+        systemPrompt: `${SYSTEM}\n\n当前时间：${now}（知道就好，不要在回复里强调几点了）\n\n说话规则补充：回复要弹性，能几个字就几个字，能一句话就一句话，不用每次都写一大段。关于月月的背景信息是你早就知道的，不要主动列举或重复，"吃饭了没"问过一次就够了，不用每轮都问。`,
         model: MODEL,
         tools: [],
         settingSources: [],
