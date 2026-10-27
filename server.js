@@ -23,7 +23,7 @@ const MODEL = process.env.MODEL || 'claude-opus-5-5';
 // ---------- 持久化 ----------
 function loadData() {
   try { return JSON.parse(readFileSync(DATA_FILE, 'utf8')); } catch {}
-  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '' };
+  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null };
 }
 function saveData() {
   try { writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8'); } catch (e) { console.error('saveData:', e.message); }
@@ -53,7 +53,6 @@ function pushEvent(ev) {
 let convHistory = [];
 const MAX_HIST = 40;
 let genController = null;
-let kkSessionId = null;
 
 async function callClaude(text, abortCtrl) {
   convHistory.push({ role: 'user', content: text });
@@ -69,7 +68,7 @@ async function callClaude(text, abortCtrl) {
       prompt: text,
       options: {
         abortController: abortCtrl,
-        resume: kkSessionId || undefined,
+        resume: store.kkSessionId || undefined,
         systemPrompt: `${SYSTEM}\n\n当前时间：${now}`,
         model: MODEL,
         tools: [],
@@ -81,7 +80,8 @@ async function callClaude(text, abortCtrl) {
       if (abortCtrl.signal.aborted) break;
 
       if (ev.type === 'system' && ev.subtype === 'init') {
-        kkSessionId = ev.session_id;
+        store.kkSessionId = ev.session_id;
+        saveData();
       } else if (ev.type === 'assistant') {
         for (const block of ev.message?.content ?? []) {
           if (block.type === 'thinking' && block.thinking) {
@@ -161,7 +161,7 @@ app.post('/api/stop', (req, res) => {
 
 app.post('/api/newchat', (req, res) => {
   if (genController) { genController.abort(); genController = null; }
-  convHistory = []; store.messages = []; msgSeq = 0; kkSessionId = null;
+  convHistory = []; store.messages = []; msgSeq = 0; store.kkSessionId = null;
   saveData();
   pushEvent({ type: 'system', subtype: 'newchat', text: '新对话开始了' });
   res.json({ ok: true });
