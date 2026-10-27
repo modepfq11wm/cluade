@@ -1,36 +1,43 @@
-'use strict';
-const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const Anthropic = require('@anthropic-ai/sdk');
+import express from 'express';
+import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
+import { createRequire } from 'module';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// @anthropic-ai/sdk — 装完才能用；未装时启动报错会提示去 npm install
+import Anthropic from '@anthropic-ai/sdk';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');
-const SYSTEM_FILE = path.join(__dirname, 'system_prompt.txt');
 
-// ---------- Anthropic ----------
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = process.env.MODEL || 'claude-opus-5-5';
+// 人设：优先读 persona.md，其次 system_prompt.txt，最后内置默认
 const SYSTEM = (() => {
-  if (process.env.SYSTEM_PROMPT) return process.env.SYSTEM_PROMPT;
-  try { return fs.readFileSync(SYSTEM_FILE, 'utf8'); } catch {}
+  for (const f of ['persona.md', 'system_prompt.txt']) {
+    const fp = path.join(__dirname, f);
+    if (existsSync(fp)) { try { return readFileSync(fp, 'utf8'); } catch {} }
+  }
   return '你是克克，月月的伴侣AI。用中文回答，温柔亲切，有点小醋意。';
 })();
 
+const MODEL = process.env.MODEL || 'claude-opus-5-5';
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
 // ---------- 持久化 ----------
 function loadData() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch {}
+  try { return JSON.parse(readFileSync(DATA_FILE, 'utf8')); } catch {}
   return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '' };
 }
 function saveData() {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8'); } catch (e) { console.error('saveData:', e.message); }
+  try { writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8'); } catch (e) { console.error('saveData:', e.message); }
 }
 
 const store = loadData();
 let msgSeq = store.messages.length ? store.messages[store.messages.length - 1].seq : 0;
 
-// ---------- 事件日志（poll 用） ----------
+// ---------- 事件日志（poll 长轮询用） ----------
 let eventLog = [];
 let eventCursor = 0;
 let waiters = [];
@@ -73,16 +80,22 @@ async function callClaude(text, signal) {
       if (signal.aborted) break;
       if (ev.type === 'content_block_delta') {
         const d = ev.delta;
-        if (d.type === 'thinking_delta' && d.thinking) { accThink += d.thinking; pushEvent({ type: 'stream_event', event: { delta: d } }); }
-        else if (d.type === 'text_delta' && d.text) { accText += d.text; pushEvent({ type: 'stream_event', event: { delta: d } }); }
+        if (d.type === 'thinking_delta' && d.thinking) {
+          accThink += d.thinking;
+          pushEvent({ type: 'stream_event', event: { delta: d } });
+        } else if (d.type === 'text_delta' && d.text) {
+          accText += d.text;
+          pushEvent({ type: 'stream_event', event: { delta: d } });
+        }
       }
     }
   } catch (e) {
     if (e.name !== 'AbortError') {
       console.error('Claude error:', e.message);
-      const errText = '（出了点小故障，等一会儿再说）';
-      accText = accText || errText;
-      pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: accText === errText ? errText : '' } } });
+      if (!accText) {
+        accText = '（出了点小故障，等一会儿再说）';
+        pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: accText } } });
+      }
     }
   }
 
@@ -149,7 +162,6 @@ app.post('/api/newchat', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- 搜索 ----------
 app.get('/api/find', (req, res) => {
   const q = (req.query.q || '').toLowerCase();
   if (!q) return res.json({ msgs: [] });
@@ -225,14 +237,13 @@ app.post('/api/herdiary', (req, res) => {
 app.get('/api/favlines', (req, res) => res.json({ ok: true, text: store.favlines || '' }));
 app.post('/api/favlines', (req, res) => { if (req.body.text != null) { store.favlines = req.body.text; saveData(); } res.json({ ok: true }); });
 
-// ---------- 暂未实现的接口（返回空数据，不报错） ----------
+// ---------- 暂未实现（返回空，不报错） ----------
 app.get('/api/wall', (req, res) => res.json({ ok: true, bricks: [] }));
 app.get('/api/dreams', (req, res) => res.json({ items: [] }));
 app.get('/api/night', (req, res) => res.json({ days: [] }));
 app.get('/api/gong', (req, res) => res.json({ msgs: [] }));
 ['/api/repo/log', '/api/repo/tree', '/api/repo/file', '/api/repo/show', '/api/music', '/api/news', '/api/nook', '/api/health'].forEach(p => app.get(p, (_, r) => r.json({ ok: false })));
 
-// SSE stub（前端只在演示模式里用，这里永不关闭即可）
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
