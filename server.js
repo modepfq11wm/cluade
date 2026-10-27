@@ -1,19 +1,15 @@
 import express from 'express';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
-import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// @anthropic-ai/sdk — 装完才能用；未装时启动报错会提示去 npm install
-import Anthropic from '@anthropic-ai/sdk';
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');
 
-// 人设：优先读 persona.md，其次 system_prompt.txt，最后内置默认
 const SYSTEM = (() => {
   for (const f of ['persona.md', 'system_prompt.txt']) {
     const fp = path.join(__dirname, f);
@@ -23,7 +19,6 @@ const SYSTEM = (() => {
 })();
 
 const MODEL = process.env.MODEL || 'claude-opus-5-5';
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ---------- 持久化 ----------
 function loadData() {
@@ -58,8 +53,9 @@ function pushEvent(ev) {
 let convHistory = [];
 const MAX_HIST = 40;
 let genController = null;
+let kkSessionId = null;
 
-async function callClaude(text, signal) {
+async function callClaude(text, abortCtrl) {
   convHistory.push({ role: 'user', content: text });
   if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
 
@@ -68,24 +64,32 @@ async function callClaude(text, signal) {
 
   let accText = '', accThink = '';
   try {
-    const stream = await client.messages.create({
-      model: MODEL, max_tokens: 8096,
-      thinking: { type: 'adaptive' },
-      system: SYSTEM,
-      messages: convHistory,
-      stream: true,
-    }, { signal });
+    for await (const ev of query({
+      prompt: text,
+      options: {
+        abortController: abortCtrl,
+        resume: kkSessionId || undefined,
+        systemPrompt: SYSTEM,
+        model: MODEL,
+        tools: [],
+        settingSources: [],
+        strictMcpConfig: true,
+        skills: [],
+      },
+    })) {
+      if (abortCtrl.signal.aborted) break;
 
-    for await (const ev of stream) {
-      if (signal.aborted) break;
-      if (ev.type === 'content_block_delta') {
-        const d = ev.delta;
-        if (d.type === 'thinking_delta' && d.thinking) {
-          accThink += d.thinking;
-          pushEvent({ type: 'stream_event', event: { delta: d } });
-        } else if (d.type === 'text_delta' && d.text) {
-          accText += d.text;
-          pushEvent({ type: 'stream_event', event: { delta: d } });
+      if (ev.type === 'system' && ev.subtype === 'init') {
+        kkSessionId = ev.session_id;
+      } else if (ev.type === 'assistant') {
+        for (const block of ev.message?.content ?? []) {
+          if (block.type === 'thinking' && block.thinking) {
+            accThink += block.thinking;
+            pushEvent({ type: 'stream_event', event: { delta: { type: 'thinking_delta', thinking: block.thinking } } });
+          } else if (block.type === 'text' && block.text) {
+            accText += block.text;
+            pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: block.text } } });
+          }
         }
       }
     }
@@ -146,7 +150,7 @@ app.post('/api/send', (req, res) => {
   pushEvent({ type: 'echo', text });
   if (genController) { genController.abort(); genController = null; }
   genController = new AbortController();
-  callClaude(text, genController.signal).catch(console.error);
+  callClaude(text, genController).catch(console.error);
 });
 
 app.post('/api/stop', (req, res) => {
@@ -156,7 +160,7 @@ app.post('/api/stop', (req, res) => {
 
 app.post('/api/newchat', (req, res) => {
   if (genController) { genController.abort(); genController = null; }
-  convHistory = []; store.messages = []; msgSeq = 0;
+  convHistory = []; store.messages = []; msgSeq = 0; kkSessionId = null;
   saveData();
   pushEvent({ type: 'system', subtype: 'newchat', text: '新对话开始了' });
   res.json({ ok: true });
@@ -237,7 +241,7 @@ app.post('/api/herdiary', (req, res) => {
 app.get('/api/favlines', (req, res) => res.json({ ok: true, text: store.favlines || '' }));
 app.post('/api/favlines', (req, res) => { if (req.body.text != null) { store.favlines = req.body.text; saveData(); } res.json({ ok: true }); });
 
-// ---------- 暂未实现（返回空，不报错） ----------
+// ---------- 暂未实现 ----------
 app.get('/api/wall', (req, res) => res.json({ ok: true, bricks: [] }));
 app.get('/api/dreams', (req, res) => res.json({ items: [] }));
 app.get('/api/night', (req, res) => res.json({ days: [] }));
