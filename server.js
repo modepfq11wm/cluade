@@ -69,7 +69,7 @@ async function callClaude(text, abortCtrl) {
       options: {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
-        systemPrompt: `${SYSTEM}\n\n当前时间：${now}`,
+        systemPrompt: `${SYSTEM}\n\n当前时间：${now}\n\n以上关于月月的信息是你早就知道的，已经融进去了，不要主动说出来，更不要像在背档案一样列举。自然说话就好。`,
         model: MODEL,
         tools: [],
         settingSources: [],
