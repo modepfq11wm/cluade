@@ -74,6 +74,13 @@ async function callClaude(text, abortCtrl) {
         tools: [],
         settingSources: [],
         strictMcpConfig: true,
+        mcpServers: {
+          'ombre-brain': {
+            type: 'http',
+            url: 'http://localhost:18001/mcp',
+            headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` },
+          },
+        },
         skills: [],
       },
     })) {
