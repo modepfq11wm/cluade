@@ -125,7 +125,7 @@ app.get('/api/messages', (req, res) => {
   const before = req.query.before != null ? parseInt(req.query.before) : null;
   let all = before != null ? store.messages.filter(m => m.seq < before) : store.messages;
   const more = all.length > limit;
-  res.json({ msgs: more ? all.slice(-limit) : all, upto: store.messages.length ? store.messages[store.messages.length - 1].seq : 0, more });
+  res.json({ msgs: more ? all.slice(-limit) : all, upto: eventCursor, more });
 });
 
 app.get('/api/poll', (req, res) => {
