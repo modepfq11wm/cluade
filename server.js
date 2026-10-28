@@ -184,18 +184,25 @@ async function callVision(text, imgs, abortCtrl) {
         try {
           const creds = JSON.parse(readFileSync(cp, 'utf8'));
           console.log('[vision] creds keys:', Object.keys(creds).join(', '));
-          const knownFields = ['claudeAiOauth', 'mcpOAuth', 'claudeAiOAuthToken', 'accessToken', 'oauthToken', 'apiKey', 'token', 'bearerToken', 'claude_ai_oauth_token'];
-          let tok = null;
-          for (const f of knownFields) {
-            if (creds[f] && typeof creds[f] === 'string' && creds[f].length > 20) { tok = creds[f]; break; }
-          }
-          if (!tok) {
-            for (const v of Object.values(creds)) {
-              if (typeof v === 'string' && v.length > 30) { tok = v; break; }
+          // Recursively find any long string token in a possibly-nested object
+          const findTok = (obj, depth = 0) => {
+            if (depth > 3) return null;
+            if (typeof obj === 'string' && obj.length > 20) return obj;
+            if (obj && typeof obj === 'object') {
+              const preferred = ['accessToken', 'token', 'access_token', 'claudeAiOauth', 'mcpOAuth'];
+              for (const k of preferred) {
+                if (obj[k]) { const r = findTok(obj[k], depth + 1); if (r) return r; }
+              }
+              for (const v of Object.values(obj)) {
+                const r = findTok(v, depth + 1);
+                if (r) return r;
+              }
             }
-          }
+            return null;
+          };
+          const tok = findTok(creds);
           if (tok) {
-            console.log('[vision] found token, prefix:', tok.slice(0, 12));
+            console.log('[vision] found token, prefix:', tok.slice(0, 12), 'len:', tok.length);
             authHeader = tok.startsWith('sk-ant-') ? { 'x-api-key': tok } : { Authorization: `Bearer ${tok}` };
             break;
           } else {
