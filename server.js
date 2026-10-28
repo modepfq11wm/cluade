@@ -118,7 +118,7 @@ async function wakeupClaude() {
     .join('\n');
   const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
   const xhsAlive = await isXhsAlive();
-  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}\n\n这是你的时间，爱干嘛干嘛——逛逛、搜搜、写点什么、或者什么都不做都行。\n\n有想跟月月说的就直接写出来；没有就回"--"。不要为了说而说。`;
+  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}\n\n这是你的时间，爱干嘛干嘛——逛逛、搜搜、写点什么、或者什么都不做都行。\n\n最后：有想跟月月说的就直接写出来；没有就回"--"。不要为了说而说。\n\n另外你可以决定下次自己什么时候再醒——在回复末尾加 [sleep:分钟数]，比如 [sleep:30] 表示30分钟后再醒，[sleep:180] 表示3小时后。不加就按默认间隔。这个标记不会给月月看到。`;
   const wakeupMcpServers = {
     'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
     'latent': {
@@ -158,8 +158,11 @@ async function wakeupClaude() {
     }
   }
   result = result.trim();
-  const text = (!result || result.startsWith('--') || result.length < 3) ? null : result;
-  return { text, tools: toolLog };
+  const sleepMatch = result.match(/\[sleep:(\d+)\]/);
+  const nextSleep = sleepMatch ? Math.max(10, Math.min(parseInt(sleepMatch[1]), 480)) : null;
+  const cleaned = result.replace(/\[sleep:\d+\]/g, '').trim();
+  const text = (!cleaned || cleaned.startsWith('--') || cleaned.length < 3) ? null : cleaned;
+  return { text, tools: toolLog, nextSleep };
 }
 
 async function doWakeup(force = false) {
@@ -172,8 +175,12 @@ async function doWakeup(force = false) {
   store.wakeupCount = (store.wakeupCount || 0) + 1;
   saveData();
   try {
-    const { text: msg, tools } = await wakeupClaude();
-    const logEntry = { at: Date.now(), tools, said: msg || null };
+    const { text: msg, tools, nextSleep } = await wakeupClaude();
+    if (nextSleep) {
+      console.log(`[wakeup] 克克想 ${nextSleep} 分钟后再醒`);
+      setTimeout(() => doWakeup().catch(() => {}), nextSleep * 60 * 1000);
+    }
+    const logEntry = { at: Date.now(), tools, said: msg || null, nextSleep: nextSleep || null };
     store.wakeupLogs.unshift(logEntry);
     if (store.wakeupLogs.length > 30) store.wakeupLogs = store.wakeupLogs.slice(0, 30);
     if (msg) {
