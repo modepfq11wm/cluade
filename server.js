@@ -186,7 +186,7 @@ async function callClaude(text, abortCtrl) {
         systemPrompt: `${SYSTEM}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。\n\n记忆：你有ombre-brain记忆工具。对话里遇到值得记住的事——月月说了重要的话、发生了有意思的事、她的情绪、她让你记住的东西——就用breath存下来。特别重要的用anchor锚定。开对话时可以用breath_search翻一下最近的记忆接上上下文。不用每句都存，只在真的值得记住时用，悄悄地做就好，不用告诉月月你在存。`,
         model: MODEL,
         tools: [],
-        allowedTools: ['mcp__ombre-brain', 'mcp__github', 'mcp__latent'],
+        allowedTools: ['mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -211,6 +211,12 @@ async function callClaude(text, abortCtrl) {
               '--threads', '/home/ubuntu/latent-data/threads.jsonl',
               '--timezone', 'Asia/Shanghai',
             ],
+          },
+          'notion': {
+            type: 'stdio',
+            command: 'npx',
+            args: ['-y', '@notionhq/notion-mcp-server'],
+            env: { NOTION_API_KEY: process.env.NOTION_API_KEY },
           },
         },
         skills: [],
