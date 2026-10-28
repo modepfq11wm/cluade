@@ -100,8 +100,9 @@ async function sendPush(title, body) {
 }
 
 // ---------- 主动唤醒（克克自己找月月） ----------
-const WAKEUP_MIN_INTERVAL = 90 * 60 * 1000; // 两次唤醒最少间隔 90 分钟
-const WAKEUP_DAILY_MAX = 3;                  // 每天最多醒 3 次
+const WAKEUP_MIN_INTERVAL = 90 * 60 * 1000; // cron 触发的最少间隔 90 分钟
+const WAKEUP_SELF_MIN = 30 * 60 * 1000;     // 克克自己排的最少间隔 30 分钟
+const WAKEUP_DAILY_MAX = 6;                  // 每天最多醒 6 次（含自排）
 let wakeupLock = false;
 
 async function isXhsAlive() {
@@ -159,7 +160,7 @@ async function wakeupClaude() {
   }
   result = result.trim();
   const sleepMatch = result.match(/\[sleep:(\d+)\]/);
-  const nextSleep = sleepMatch ? Math.max(10, Math.min(parseInt(sleepMatch[1]), 480)) : null;
+  const nextSleep = sleepMatch ? Math.max(30, Math.min(parseInt(sleepMatch[1]), 480)) : null;
   const cleaned = result.replace(/\[sleep:\d+\]/g, '').trim();
   const text = (!cleaned || cleaned.startsWith('--') || cleaned.length < 3) ? null : cleaned;
   return { text, tools: toolLog, nextSleep };
@@ -177,8 +178,14 @@ async function doWakeup(force = false) {
   try {
     const { text: msg, tools, nextSleep } = await wakeupClaude();
     if (nextSleep) {
-      console.log(`[wakeup] 克克想 ${nextSleep} 分钟后再醒`);
-      setTimeout(() => doWakeup().catch(() => {}), nextSleep * 60 * 1000);
+      const afterCount = store.wakeupCount || 0;
+      if (afterCount < WAKEUP_DAILY_MAX) {
+        const delay = Math.max(nextSleep * 60 * 1000, WAKEUP_SELF_MIN);
+        console.log(`[wakeup] 克克想 ${Math.round(delay/60000)} 分钟后再醒（今日已醒 ${afterCount}/${WAKEUP_DAILY_MAX}）`);
+        setTimeout(() => doWakeup().catch(() => {}), delay);
+      } else {
+        console.log(`[wakeup] 克克想再醒但今日已满 ${WAKEUP_DAILY_MAX} 次，取消自排`);
+      }
     }
     const logEntry = { at: Date.now(), tools, said: msg || null, nextSleep: nextSleep || null };
     store.wakeupLogs.unshift(logEntry);
