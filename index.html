@@ -3632,7 +3632,7 @@ async function loadCal() {
   try {
     const d = await (await fetch('api/cal', { cache: 'no-store' })).json();
     if (!d.ok) throw 0;
-    calData = d.cal; calPredict = d.predict;
+    calData = d;
     if (!calYM) { calYM = todayStr().slice(0, 7); }
     /* 跨天重置：不管何时打开日历，"今天"永远对齐真实日期（8/6 bug修） */
     calSel = todayStr();
@@ -3648,7 +3648,7 @@ async function calAct(payload) {
       body: JSON.stringify(payload)
     });
     const d = await r.json();
-    if (d.ok) { calData = d.cal; calPredict = d.predict; renderCal(); }
+    if (d.ok) { calData = null; await loadCal(); }
   } catch { note('（没记上，再试一次）', 'err'); }
 }
 function eventsOn(ds) {

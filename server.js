@@ -28,7 +28,7 @@ const MODEL = process.env.MODEL || 'claude-opus-5-5';
 // ---------- 持久化 ----------
 function loadData() {
   try { return JSON.parse(readFileSync(DATA_FILE, 'utf8')); } catch {}
-  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null, vapid: null, pushSubs: [], wakeupEnabled: false, lastWakeup: 0, wakeupCount: 0 };
+  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], calDays: {}, notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null, vapid: null, pushSubs: [], wakeupEnabled: false, lastWakeup: 0, wakeupCount: 0 };
 }
 function saveData() {
   try { writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8'); } catch (e) { console.error('saveData:', e.message); }
@@ -37,6 +37,7 @@ function saveData() {
 const store = loadData();
 if (!store.pushSubs) store.pushSubs = [];
 if (!store.wakeupCount) store.wakeupCount = 0;
+if (!store.calDays) store.calDays = {};
 
 // 每天零点重置今日醒来次数
 (function scheduleReset() {
@@ -340,12 +341,20 @@ app.post('/api/whisper', (req, res) => {
 });
 
 // ---------- 日历 ----------
-app.get('/api/cal', (req, res) => res.json({ ok: true, events: store.cal, period: null }));
+app.get('/api/cal', (req, res) => res.json({ ok: true, events: store.cal, period: { days: store.calDays } }));
 app.post('/api/cal', (req, res) => {
-  const { action, event } = req.body;
-  if (action === 'add' && event) { event.id = Date.now(); store.cal.push(event); }
-  else if (action === 'del' && event?.id) store.cal = store.cal.filter(e => e.id !== event.id);
-  else if (action === 'edit' && event?.id) { const i = store.cal.findIndex(e => e.id === event.id); if (i >= 0) store.cal[i] = event; }
+  const b = req.body;
+  if (b.action === 'add_event') {
+    const ev = { id: Date.now(), date: b.date, text: b.text, time: b.time || '', yearly: !!b.yearly, special: !!b.special };
+    store.cal.push(ev);
+  } else if (b.action === 'del_event') {
+    store.cal = store.cal.filter(e => e.id !== b.id);
+  } else if (b.action === 'set_mood') {
+    store.calDays[b.date] = { ...(store.calDays[b.date] || {}), mood: b.mood };
+  } else if (b.action === 'day_record') {
+    const { action, date, ...fields } = b;
+    store.calDays[date] = { ...(store.calDays[date] || {}), ...fields };
+  }
   saveData(); res.json({ ok: true });
 });
 
