@@ -39,6 +39,7 @@
     --accent: #e8758a;
     --accent-soft: #f09aaa;
     --user-bubble: #ffd0c4;
+    --kk-bubble: #d6eeff;
     --sage: #96B08F;
     --sage-track: #E7EDE2;
     --pink-track: #F8E5DE;
@@ -57,7 +58,7 @@
   @media (prefers-color-scheme: dark) {
 html:not([data-theme="light"]) {
       --bg: #262624; --card: #30302e; --panel: #383836; --line: #3d3d3a;
-      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #5a3035;
+      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #5a3035; --kk-bubble: #1a3348;
       --sage: #A8C0A0; --sage-track: #3A423A; --pink-track: #4A3B34;
       --green: #6fbf85; --red: #e07a6a;
       --amber: #e8b45c; --amber-track: #4a4232; --red-track: #4d3a36;
@@ -67,7 +68,7 @@ html:not([data-theme="light"]) {
 }
 html[data-theme="dark"] {
       --bg: #262624; --card: #30302e; --panel: #383836; --line: #3d3d3a;
-      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #5a3035;
+      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #5a3035; --kk-bubble: #1a3348;
       --sage: #A8C0A0; --sage-track: #3A423A; --pink-track: #4A3B34;
       --green: #6fbf85; --red: #e07a6a;
       --amber: #e8b45c; --amber-track: #4a4232; --red-track: #4d3a36;
@@ -251,6 +252,10 @@ html[data-theme="dark"] .glass,
     max-width: 85%; white-space: pre-wrap; word-break: break-word;
   }
   .gu { white-space: pre-wrap; word-break: break-word; }
+  #log .gu { background: var(--kk-bubble); border-radius: 18px; padding: 10px 16px; max-width: 85%; }
+  .ts { font-size: 11px; color: var(--dim); margin-top: 4px; display: block; }
+  .row.me .ts { text-align: right; padding-right: 2px; }
+  .row:not(.me) .ts { padding-left: 2px; }
   .gu img.chatimg, .bubble img.chatimg {
     max-width: min(240px, 70%); border-radius: 14px; display: block; margin: 6px 0;
   }
@@ -2071,12 +2076,26 @@ function row(cls) {
   log.appendChild(d);
   return d;
 }
-function addMe(text) {
+function nowTs() {
+  return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+function fmtTs(at) {
+  if (!at) return nowTs();
+  return new Date(at * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+function addTs(r, text) {
+  const t = document.createElement('span');
+  t.className = 'ts';
+  t.textContent = text;
+  r.appendChild(t);
+}
+function addMe(text, ts) {
   const r = row('me');
   const b = document.createElement('div');
   b.className = 'bubble';
   b.textContent = text;
   r.appendChild(b);
+  addTs(r, ts || nowTs());
   renderRich(b);
   scroll(true);
   guEl = null; endThink(); closeGroup();
@@ -2145,13 +2164,14 @@ function openThinkSheet(idx) {
   thinkBodyEl.textContent = thinkStore[idx].text;
   sheets.think.classList.add('open');
 }
-function ensureGu() {
+function ensureGu(ts) {
   if (guEl) return guEl;
   closeThink(); closeGroup();
   const r = row();
   const d = document.createElement('div');
   d.className = 'gu';
   r.appendChild(d);
+  addTs(r, ts || nowTs());
   guEl = d;
   scroll();
   return guEl;
@@ -2760,10 +2780,11 @@ toolBack.onclick = () => {
 
 function renderSaid(msgs) {
   for (const m of msgs) {
-    if (m.kind === 'me') { endThink(); addMe(m.text); }
+    const ts = fmtTs(m.at);
+    if (m.kind === 'me') { endThink(); addMe(m.text, ts); }
     else if (m.kind === 'gu') {
       endThink();                    // 该说正文了，思考那段收工
-      const el = ensureGu();
+      const el = ensureGu(ts);
       el._raw = m.text;
       el._final = true;              // 这是说完了的，谁都别再画它
       el.textContent = m.text;
