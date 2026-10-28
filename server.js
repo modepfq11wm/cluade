@@ -319,8 +319,7 @@ async function callClaude(text, attachments, abortCtrl) {
           },
           'xiaohongshu': {
             type: 'http',
-            url: 'https://audio-perky-tasting.ngrok-free.dev/mcp',
-            headers: { 'ngrok-skip-browser-warning': '1' },
+            url: 'https://xhs.moonkk.asia/mcp',
           },
           'notion': {
             type: 'stdio',
