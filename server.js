@@ -61,7 +61,8 @@ async function callClaude(text, abortCtrl) {
   store.messages.push({ seq: ++msgSeq, kind: 'me', text, at: Date.now() });
   saveData();
 
-  let accText = '', accThink = '';
+  let accText = '', accThink = '', memStored = false;
+  const MEM_TOOLS = new Set(['breath', 'anchor', 'hold', 'grow', 'dream', 'feel', 'trace']);
   try {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     for await (const ev of query({
@@ -101,6 +102,8 @@ async function callClaude(text, abortCtrl) {
           } else if (block.type === 'text' && block.text) {
             accText += block.text;
             pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: block.text } } });
+          } else if (block.type === 'tool_use' && MEM_TOOLS.has(block.name)) {
+            memStored = true;
           }
         }
       }
@@ -115,6 +118,10 @@ async function callClaude(text, abortCtrl) {
     }
   }
 
+  if (memStored) {
+    pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: ' ⭐' } } });
+    accText += ' ⭐';
+  }
   if (accThink) store.messages.push({ seq: ++msgSeq, kind: 'think', text: accThink, at: Date.now() });
   if (accText) {
     store.messages.push({ seq: ++msgSeq, kind: 'gu', text: accText, at: Date.now() });
