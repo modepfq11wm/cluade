@@ -217,9 +217,12 @@ async function callClaude(text, attachments, abortCtrl) {
 
   let accText = '', accThink = '', memStored = false;
 
+  let visionDone = false;
   if (imgs.length > 0) {
-    accText = await callVision(text, imgs, abortCtrl) || '';
-    if (accText) {
+    const vr = await callVision(text, imgs, abortCtrl);
+    if (vr) {
+      visionDone = true;
+      accText = vr;
       const chunks = accText.match(/[^\s]*\s*/g) || [accText];
       for (const chunk of chunks) {
         if (!chunk || abortCtrl.signal.aborted) continue;
@@ -227,12 +230,16 @@ async function callClaude(text, attachments, abortCtrl) {
         await new Promise(r => setImmediate(r));
       }
     }
-  } else {
+  }
+  if (!visionDone) {
+  const queryPrompt = imgs.length > 0
+    ? [text, `[月月发了${imgs.length}张图片，你看不到内容，自然回应一下]`].filter(Boolean).join('\n')
+    : text;
   const MEM_TOOLS = new Set(['breath', 'anchor', 'hold', 'grow', 'dream', 'feel', 'trace']);
   try {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     for await (const ev of query({
-      prompt: text,
+      prompt: queryPrompt,
       options: {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
@@ -320,7 +327,7 @@ async function callClaude(text, attachments, abortCtrl) {
     pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: ' ⭐' } } });
     accText += ' ⭐';
   }
-  } // end else (text path)
+  } // end !visionDone
 
   if (accThink) store.messages.push({ seq: ++msgSeq, kind: 'think', text: accThink, at: Date.now() });
   if (accText) {
