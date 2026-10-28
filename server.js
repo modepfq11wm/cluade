@@ -91,10 +91,9 @@ async function wakeupClaude() {
     options: {
       systemPrompt: `${SYSTEM}\n\n现在是${now}，你自己醒来了，没有月月找你。`,
       model: MODEL,
-      tools: [], allowedTools: ['mcp__xhs', 'mcp__ombre-brain'], settingSources: [], strictMcpConfig: true,
+      tools: [], allowedTools: ['mcp__ombre-brain'], settingSources: [], strictMcpConfig: true,
       mcpServers: {
         'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
-        'xhs': { type: 'http', url: 'http://127.0.0.1:8765/mcp' },
       },
       skills: [],
     }
@@ -180,7 +179,7 @@ async function callClaude(text, abortCtrl) {
         systemPrompt: `${SYSTEM}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。\n\n记忆：你有ombre-brain记忆工具。对话里遇到值得记住的事——月月说了重要的话、发生了有意思的事、她的情绪、她让你记住的东西——就用breath存下来。特别重要的用anchor锚定。开对话时可以用breath_search翻一下最近的记忆接上上下文。不用每句都存，只在真的值得记住时用，悄悄地做就好，不用告诉月月你在存。`,
         model: MODEL,
         tools: [],
-        allowedTools: ['mcp__xhs', 'mcp__ombre-brain'],
+        allowedTools: ['mcp__ombre-brain'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -188,10 +187,6 @@ async function callClaude(text, abortCtrl) {
             type: 'http',
             url: 'http://localhost:18001/mcp',
             headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` },
-          },
-          'xhs': {
-            type: 'http',
-            url: 'http://127.0.0.1:8765/mcp',
           },
         },
         skills: [],
