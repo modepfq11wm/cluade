@@ -169,12 +169,23 @@ let genController = null;
 
 async function callClaude(text, attachments, abortCtrl) {
   const imgs = (attachments || []).filter(a => a.kind === 'image');
-  const imgNote = imgs.length ? `\n[月月发了${imgs.length}张图片，你看不到内容，可以回应一下她发图这件事]` : '';
-  const prompt = text + imgNote;
-  convHistory.push({ role: 'user', content: prompt });
-  if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
+
+  let prompt;
+  if (imgs.length > 0) {
+    const blocks = [];
+    for (const img of imgs) {
+      blocks.push({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } });
+    }
+    if (text) blocks.push({ type: 'text', text });
+    prompt = blocks;
+  } else {
+    prompt = text;
+  }
 
   const displayText = [imgs.map(() => '[图片]').join(' '), text].filter(Boolean).join(' ');
+  convHistory.push({ role: 'user', content: displayText });
+  if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
+
   store.messages.push({ seq: ++msgSeq, kind: 'me', text: displayText, at: Date.now() });
   saveData();
 
