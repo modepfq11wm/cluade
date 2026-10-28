@@ -308,7 +308,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
 
-【当下黑板 & 百宝箱】系统已在对话开头自动注入月月的实时状态，你看到了直接用就好。如果月月提到：位置变动（去哪了/到了/离开了）→ now_set where；身体不适/恢复 → now_set body；吃药/护理进度 → now_set care；心情 → now_set mood；今天计划 → now_set plan；喝水/吃饭计数 → now_bump water/food；家里东西买了/用了 → pantry_set/pantry_use。悄悄更新，不要汇报"我帮你记了"。
+【当下黑板 & 百宝箱】系统已在对话开头自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。
 
 `,
         model: MODEL,
