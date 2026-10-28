@@ -357,6 +357,48 @@ app.post('/api/notes', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Notion 日记同步 ----------
+const NOTION_PARENT_ID = '404cdd9495c581429cf7da41010ac230';
+
+async function notionReq(method, path, body) {
+  const token = process.env.NOTION_API_KEY;
+  if (!token) return null;
+  const res = await fetch(`https://api.notion.com/v1${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`Notion ${method} ${path} → ${res.status}`);
+  return res.json();
+}
+
+function textToBlocks(text) {
+  return text.split('\n').map(line => ({
+    object: 'block', type: 'paragraph',
+    paragraph: { rich_text: line.trim() ? [{ type: 'text', text: { content: line } }] : [] },
+  }));
+}
+
+async function syncDiaryToNotion(date, text) {
+  if (!process.env.NOTION_API_KEY) return;
+  const title = date.replace(/-/g, '.') + ' 日记';
+  try {
+    const search = await notionReq('POST', '/search', { query: title, filter: { property: 'object', value: 'page' } });
+    const page = search?.results?.find(p => p.properties?.title?.title?.[0]?.plain_text === title);
+    if (!page) {
+      await notionReq('POST', '/pages', {
+        parent: { page_id: NOTION_PARENT_ID },
+        properties: { title: [{ text: { content: title } }] },
+        children: textToBlocks(text),
+      });
+    } else {
+      const blocks = await notionReq('GET', `/blocks/${page.id}/children`);
+      await Promise.all((blocks?.results || []).map(b => notionReq('DELETE', `/blocks/${b.id}`)));
+      if (text.trim()) await notionReq('PATCH', `/blocks/${page.id}/children`, { children: textToBlocks(text) });
+    }
+  } catch (e) { console.error('[notion-diary]', e.message); }
+}
+
 // ---------- 她的日记 ----------
 app.get('/api/herdiary', (req, res) => res.json({ items: store.herdiary }));
 app.post('/api/herdiary', (req, res) => {
@@ -366,6 +408,7 @@ app.post('/api/herdiary', (req, res) => {
     const i = store.herdiary.findIndex(e => e.date === d);
     if (i >= 0) store.herdiary[i].text = text; else store.herdiary.push({ date: d, text, at: Math.floor(Date.now() / 1000) });
     saveData();
+    syncDiaryToNotion(d, text).catch(() => {});
   }
   res.json({ ok: true });
 });
