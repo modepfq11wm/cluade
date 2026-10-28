@@ -203,7 +203,12 @@ async function callVision(text, imgs, abortCtrl) {
           const tok = findTok(creds);
           if (tok) {
             console.log('[vision] found token, prefix:', tok.slice(0, 12), 'len:', tok.length);
-            authHeader = tok.startsWith('sk-ant-') ? { 'x-api-key': tok } : { Authorization: `Bearer ${tok}` };
+            // sk-ant-oat = OAuth Access Token → Bearer; sk-ant-api = API key → x-api-key
+            authHeader = tok.startsWith('sk-ant-oat')
+              ? { Authorization: `Bearer ${tok}` }
+              : tok.startsWith('sk-ant-api') || tok.startsWith('sk-')
+                ? { 'x-api-key': tok }
+                : { Authorization: `Bearer ${tok}` };
             break;
           } else {
             console.log('[vision] no token found in', cp);
