@@ -251,6 +251,10 @@ async function callClaude(text, abortCtrl) {
 // ---------- Express ----------
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // ---------- 聊天核心 ----------
 app.get('/api/messages', (req, res) => {
@@ -451,13 +455,17 @@ app.get('/api/herdiary', async (req, res) => {
   res.json({ items: store.herdiary });
 });
 app.post('/api/herdiary', (req, res) => {
-  const { text, date } = req.body;
-  if (text != null) {
-    const d = date || new Date().toISOString().split('T')[0];
-    const i = store.herdiary.findIndex(e => e.date === d);
-    if (i >= 0) store.herdiary[i].text = text; else store.herdiary.push({ date: d, text, at: Math.floor(Date.now() / 1000) });
+  const { action, text, date, id } = req.body;
+  if (action === 'del' && id) {
+    store.herdiary = store.herdiary.filter(e => e.id !== id);
     saveData();
-    notionDiaryCache = null; // 写完清缓存，下次 GET 重拉
+  } else if (text != null) {
+    const d = date || new Date().toISOString().split('T')[0];
+    const entry = { id: Date.now(), date: d, text, at: Math.floor(Date.now() / 1000) };
+    const i = store.herdiary.findIndex(e => e.date === d);
+    if (i >= 0) store.herdiary[i] = { ...store.herdiary[i], ...entry }; else store.herdiary.push(entry);
+    saveData();
+    notionDiaryCache = null;
     syncDiaryToNotion(d, text).catch(() => {});
   }
   res.json({ ok: true });

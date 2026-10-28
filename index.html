@@ -3982,22 +3982,30 @@ async function renderHerDiary() {
     (d.items || []).forEach(it => {
       const c = document.createElement('div');
       c.className = 'hd-item';
-      const dt = new Date(it.at * 1000 + (8 * 60 + new Date().getTimezoneOffset()) * 60000);
       const dd = document.createElement('div');
       dd.className = 'hdd';
-      dd.textContent = (dt.getMonth() + 1) + ' 月 ' + dt.getDate() + ' 日 · '
-        + String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+      if (it.id) {
+        const dt = new Date(it.at * 1000 + (8 * 60 + new Date().getTimezoneOffset()) * 60000);
+        dd.textContent = (dt.getMonth() + 1) + ' 月 ' + dt.getDate() + ' 日 · '
+          + String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+      } else {
+        const parts = it.date.split('-');
+        dd.textContent = parseInt(parts[1], 10) + ' 月 ' + parseInt(parts[2], 10) + ' 日';
+      }
       const tx = document.createElement('div');
       tx.className = 'hdt'; tx.textContent = it.text;
-      const del = document.createElement('button');
-      del.className = 'hdx';
-      del.appendChild(icEl('x', 13));
-      del.onclick = async () => {
-        await fetch('api/herdiary', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'del', id: it.id }) }).catch(() => {});
-        renderHerDiary();
-      };
-      c.append(dd, tx, del);
+      c.append(dd, tx);
+      if (it.id) {
+        const del = document.createElement('button');
+        del.className = 'hdx';
+        del.appendChild(icEl('x', 13));
+        del.onclick = async () => {
+          await fetch('api/herdiary', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'del', id: it.id }) }).catch(() => {});
+          renderHerDiary();
+        };
+        c.appendChild(del);
+      }
       wallBody.appendChild(c);
     });
     if (!(d.items || []).length) {
