@@ -223,20 +223,28 @@ async function callVision(text, imgs, abortCtrl) {
     ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } })),
     ...(text ? [{ type: 'text', text }] : []),
   ];
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { ...authHeader, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, messages: [{ role: 'user', content }] }),
-      signal: abortCtrl.signal,
-    });
-    if (!res.ok) { console.error('[vision]', res.status, await res.text()); return null; }
-    const data = await res.json();
-    return data.content?.find(b => b.type === 'text')?.text || null;
-  } catch (e) {
-    if (e.name !== 'AbortError') console.error('[vision]', e.message);
-    return null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { ...authHeader, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-haiku-3-5', max_tokens: 1024, system: SYSTEM, messages: [{ role: 'user', content }] }),
+        signal: abortCtrl.signal,
+      });
+      if (res.status === 429) {
+        console.log('[vision] 429 rate limit, retry', attempt + 1);
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      if (!res.ok) { console.error('[vision]', res.status, await res.text()); return null; }
+      const data = await res.json();
+      return data.content?.find(b => b.type === 'text')?.text || null;
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error('[vision]', e.message);
+      return null;
+    }
   }
+  return null;
 }
 
 async function callClaude(text, attachments, abortCtrl) {
