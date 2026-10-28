@@ -247,7 +247,7 @@ async function callVision(text, imgs, abortCtrl) {
   return null;
 }
 
-async function callClaude(text, attachments, abortCtrl) {
+async function callClaude(text, attachments, abortCtrl, resetTimer) {
   const imgs = (attachments || []).filter(a => a.kind === 'image');
   const displayText = [imgs.map(() => '[图片]').join(' '), text].filter(Boolean).join(' ');
   convHistory.push({ role: 'user', content: displayText });
@@ -338,6 +338,7 @@ async function callClaude(text, attachments, abortCtrl) {
       },
     })) {
       if (abortCtrl.signal.aborted) break;
+      if (resetTimer) resetTimer();
 
       if (ev.type === 'system' && ev.subtype === 'init') {
         store.kkSessionId = ev.session_id;
@@ -434,14 +435,32 @@ app.post('/api/send', (req, res) => {
   if (genController) { genController.abort(); genController = null; }
   genController = new AbortController();
   const ctrl = genController;
-  const killTimer = setTimeout(() => {
-    if (!ctrl.signal.aborted) {
-      ctrl.abort();
-      pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: '（这轮想太久了，发条新消息让我重新来过）' } } });
-      pushEvent({ type: 'result' });
+  const startedAt = Date.now();
+  const IDLE_TIMEOUT = 90000;   // 90s无响应才超时
+  const HARD_TIMEOUT = 360000;  // 6分钟硬上限
+  let killTimer;
+  const resetKillTimer = () => {
+    clearTimeout(killTimer);
+    const elapsed = Date.now() - startedAt;
+    const delay = Math.min(IDLE_TIMEOUT, Math.max(0, HARD_TIMEOUT - elapsed));
+    if (delay <= 0) {
+      if (!ctrl.signal.aborted) {
+        ctrl.abort();
+        pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: '（这轮太久了，发条新消息让我重新来过）' } } });
+        pushEvent({ type: 'result' });
+      }
+      return;
     }
-  }, 90000);
-  callClaude(text, attachments, ctrl).catch(console.error).finally(() => clearTimeout(killTimer));
+    killTimer = setTimeout(() => {
+      if (!ctrl.signal.aborted) {
+        ctrl.abort();
+        pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: '（这轮想太久了，发条新消息让我重新来过）' } } });
+        pushEvent({ type: 'result' });
+      }
+    }, delay);
+  };
+  resetKillTimer();
+  callClaude(text, attachments, ctrl, resetKillTimer).catch(console.error).finally(() => clearTimeout(killTimer));
 });
 
 app.post('/api/stop', (req, res) => {
