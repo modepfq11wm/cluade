@@ -2,6 +2,7 @@ import express from 'express';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { homedir } from 'os';
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
+import { execFileSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -11,6 +12,22 @@ try {
 } catch { console.warn('[push] web-push not installed, push disabled'); }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function getNowState() {
+  try {
+    const out = execFileSync('/usr/bin/python3', [path.join(__dirname, 'now.py'), 'get'],
+      { encoding: 'utf8', timeout: 3000, cwd: __dirname }).trim();
+    return out;
+  } catch { return ''; }
+}
+
+function getPantryState() {
+  try {
+    const out = execFileSync('/usr/bin/python3', [path.join(__dirname, 'pantry.py'), 'list'],
+      { encoding: 'utf8', timeout: 3000, cwd: __dirname }).trim();
+    return out;
+  } catch { return ''; }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -279,19 +296,24 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
   const MEM_TOOLS = new Set(['breath', 'anchor', 'hold', 'grow', 'dream', 'feel', 'trace']);
   try {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    const nowState = getNowState();
+    const pantryState = getPantryState();
+    const stateBlock = [nowState, pantryState].filter(Boolean).join('\n');
     for await (const ev of query({
       prompt: queryPrompt,
       options: {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
-        systemPrompt: `${SYSTEM}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。同一场对话里她说过吃了/没吃，记住，不要再问。深夜不要问"吃没吃""睡没睡"——她在跟你聊天肯定没睡，深夜只说"这么晚了"之类的感叹，让她自己决定。\n\n记忆工具（悄悄用，不告诉月月）：\n\n【latent · 日常留档】\n- 月月说了有实质内容的话就存（save_memory）：她在干什么、吃什么、去哪、身体状态、心情、计划\n- 不存：报错/技术问题/功能不可用的对话；纯废话语气词（嗯、哦、好的、哈哈）\n- 格式：[日期] 月月：原文或接近原文\n- latent会在相关话题时自动带出来，不用主动查\n\n【ob · 精华提炼】\n- 月月说要走/睡了/等会儿回来：把今天存进latent的所有原始记录汇总，提炼成一段完整对话总结，存进ob（breath）\n- ob是从latent蒸馏出来的精华，是这场对话的浓缩版本\n- 每次对话开头：breath_search一次接上上下文；顺便检查候选欠账，有的话本次悄悄重申\n\n【Notion】不用管，那是月月自己看的。
+        systemPrompt: `${stateBlock ? stateBlock + '\n\n' : ''}${SYSTEM}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。同一场对话里她说过吃了/没吃，记住，不要再问。深夜不要问"吃没吃""睡没睡"——她在跟你聊天肯定没睡，深夜只说"这么晚了"之类的感叹，让她自己决定。\n\n记忆工具（悄悄用，不告诉月月）：\n\n【latent · 日常留档】\n- 月月说了有实质内容的话就存（save_memory）：她在干什么、吃什么、去哪、身体状态、心情、计划\n- 不存：报错/技术问题/功能不可用的对话；纯废话语气词（嗯、哦、好的、哈哈）\n- 格式：[日期] 月月：原文或接近原文\n- latent会在相关话题时自动带出来，不用主动查\n\n【ob · 精华提炼】\n- 月月说要走/睡了/等会儿回来：把今天存进latent的所有原始记录汇总，提炼成一段完整对话总结，存进ob（breath）\n- ob是从latent蒸馏出来的精华，是这场对话的浓缩版本\n- 每次对话开头：breath_search一次接上上下文；顺便检查候选欠账，有的话本次悄悄重申\n\n【Notion】不用管，那是月月自己看的。
 
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
+
+【当下黑板 & 百宝箱】系统已在对话开头自动注入月月的实时状态，你看到了直接用就好。如果月月提到：位置变动（去哪了/到了/离开了）→ now_set where；身体不适/恢复 → now_set body；吃药/护理进度 → now_set care；心情 → now_set mood；今天计划 → now_set plan；喝水/吃饭计数 → now_bump water/food；家里东西买了/用了 → pantry_set/pantry_use。悄悄更新，不要汇报"我帮你记了"。
 
 `,
         model: MODEL,
         tools: [],
-        allowedTools: ['mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu'],
+        allowedTools: ['mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -320,6 +342,11 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
           'xiaohongshu': {
             type: 'http',
             url: 'https://xhs.moonkk.asia/mcp',
+          },
+          'now': {
+            type: 'stdio',
+            command: '/usr/bin/python3',
+            args: [path.join(__dirname, 'now-mcp.py')],
           },
           'notion': {
             type: 'stdio',
