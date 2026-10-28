@@ -23,7 +23,7 @@ const SYSTEM = (() => {
   return '你是克克，月月的伴侣AI。用中文回答，温柔亲切，有点小醋意。';
 })();
 
-const MODEL = process.env.MODEL || 'claude-opus-5-5';
+const MODEL = process.env.MODEL || 'claude-sonnet-4-6';
 
 // ---------- 持久化 ----------
 function loadData() {
@@ -289,7 +289,15 @@ app.post('/api/send', (req, res) => {
   pushEvent({ type: 'echo', text });
   if (genController) { genController.abort(); genController = null; }
   genController = new AbortController();
-  callClaude(text, genController).catch(console.error);
+  const ctrl = genController;
+  const killTimer = setTimeout(() => {
+    if (!ctrl.signal.aborted) {
+      ctrl.abort();
+      pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: '（这轮想太久了，发条新消息让我重新来过）' } } });
+      pushEvent({ type: 'result' });
+    }
+  }, 90000);
+  callClaude(text, ctrl).catch(console.error).finally(() => clearTimeout(killTimer));
 });
 
 app.post('/api/stop', (req, res) => {
