@@ -432,6 +432,11 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 app.use(express.json({ limit: '10mb' }));
 // public/ 只放 CSS/图片等资源，index.html 不要放进去
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'sw.js'));
+});
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'index.html'));
