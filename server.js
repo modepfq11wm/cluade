@@ -27,8 +27,6 @@ const SYSTEM = (() => {
   return base;
 })();
 
-let MODEL = process.env.MODEL || store.selectedModel || 'claude-sonnet-4-6';
-
 // ---------- 持久化 ----------
 function loadData() {
   try { return JSON.parse(readFileSync(DATA_FILE, 'utf8')); } catch {}
@@ -39,6 +37,7 @@ function saveData() {
 }
 
 const store = loadData();
+let MODEL = process.env.MODEL || store.selectedModel || 'claude-sonnet-4-6';
 if (!store.pushSubs) store.pushSubs = [];
 if (!store.wakeupCount) store.wakeupCount = 0;
 if (!store.calDays) store.calDays = {};
