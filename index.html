@@ -4267,18 +4267,18 @@ async function openNoteFull(b) {
 async function loadWall() {
   wallBody.innerHTML = '<div class="wall-intro"><div class="sub">搬便签中…</div></div>';
   try {
+    if (wallMode === 'her') { renderHerDiary(); return; }
+    if (wallMode === 'fav') { renderFav(); return; }
     if (!wallBricks) {
       const d = await (await fetch('api/wall?lite=1', { cache: 'no-store' })).json();
       if (!d.ok || !d.bricks.length) throw 0;
       wallBricks = d.bricks;
       boardDates = [...new Set(d.bricks.map(b => b.date))].sort();
-      boardIdx = boardDates.length - 1;   // 打开先看最近的一天
+      boardIdx = boardDates.length - 1;
     }
     if (wallMode === 'bento') renderBento();
     else if (wallMode === 'timeline') renderTimeline();
     else if (wallMode === 'board') renderBoard();
-    else if (wallMode === 'her') renderHerDiary();
-    else if (wallMode === 'fav') renderFav();
     else renderWall(wallBricks);
   } catch {
     wallBody.innerHTML = '<div class="wall-intro"><div class="sub">便签没搬过来，再开一次试试</div></div>';
