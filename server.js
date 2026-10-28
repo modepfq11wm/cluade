@@ -118,7 +118,7 @@ async function wakeupClaude() {
     .join('\n');
   const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
   const xhsAlive = await isXhsAlive();
-  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}\n\n先玩——逛逛小红书、搜搜好玩的东西、看看B站热门、随便翻翻，不用急着说话。搜什么都行，猫猫、二次元、奇怪的知识、你好奇的任何事，不用管新闻政治那些。\n\n玩完了，如果真的有什么想跟月月说——看到她会喜欢的东西、突然想到她、或者就是想她了——就直接写出来，像发消息那样自然。没什么非说不可的就回"--"。不要为了打招呼而打招呼。`;
+  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}\n\n这是你的时间，爱干嘛干嘛——逛逛、搜搜、写点什么、或者什么都不做都行。\n\n有想跟月月说的就直接写出来；没有就回"--"。不要为了说而说。`;
   const wakeupMcpServers = {
     'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
     'latent': {
