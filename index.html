@@ -5723,19 +5723,31 @@ function themeNow() {
 }
 function wearTheme(t) {
   if (t === 'dark') document.documentElement.dataset.theme = 'dark';
+  else if (t === 'light') document.documentElement.dataset.theme = 'light';
   else delete document.documentElement.dataset.theme;
   try { localStorage.setItem('homeTheme', t); } catch (e) {}
-  const dark = t === 'dark' || (t !== 'dark'
+  const dark = t === 'dark' || (t === 'auto'
     && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
   document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
   const m = document.createElement('meta');
-  m.name = 'theme-color'; m.content = dark ? '#262624' : '#faf9f5';
+  m.name = 'theme-color'; m.content = dark ? '#a05468' : '#f9adc0';
   document.head.appendChild(m);
   themeSw.classList.remove('wait');
   themeSw.classList.toggle('on', t === 'dark');
+  // 更新按钮文案提示下一个状态
+  const row = document.getElementById('themeRow');
+  if (row) {
+    const labels = { auto: '跟随系统', dark: '常暗', light: '常亮' };
+    const val = row.querySelector('.val') || (() => {
+      const v = document.createElement('span'); v.className = 'val'; row.appendChild(v); return v;
+    })();
+    val.textContent = labels[t] || '跟随系统';
+  }
 }
-document.getElementById('themeRow').onclick = () =>
-  wearTheme(themeNow() === 'dark' ? 'auto' : 'dark');
+document.getElementById('themeRow').onclick = () => {
+  const cur = themeNow();
+  wearTheme(cur === 'auto' ? 'dark' : cur === 'dark' ? 'light' : 'auto');
+};
 wearTheme(themeNow());
 
 document.getElementById('rewakeRow').onclick = async () => {
