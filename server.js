@@ -376,13 +376,16 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
             accThink += block.thinking;
             pushEvent({ type: 'stream_event', event: { delta: { type: 'thinking_delta', thinking: block.thinking } } });
           } else if (block.type === 'text' && block.text) {
-            accText += block.text;
-            // Simulate streaming: emit word-by-word so client receives text progressively
-            const chunks = block.text.match(/[^\s]*\s*/g) || [block.text];
-            for (const chunk of chunks) {
-              if (!chunk) continue;
-              pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: chunk } } });
-              await new Promise(r => setImmediate(r));
+            const newText = block.text;
+            if (!accText.endsWith(newText)) {
+              accText += newText;
+              // Simulate streaming: emit word-by-word so client receives text progressively
+              const chunks = newText.match(/[^\s]*\s*/g) || [newText];
+              for (const chunk of chunks) {
+                if (!chunk) continue;
+                pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: chunk } } });
+                await new Promise(r => setImmediate(r));
+              }
             }
           } else if (block.type === 'tool_use' && MEM_TOOLS.has(block.name)) {
             memStored = true;
