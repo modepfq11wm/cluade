@@ -3929,11 +3929,11 @@ function renderBento() {
     return c;
   };
   const latestDate = boardDates[boardDates.length - 1];
-  const latest = wallBricks.filter(b => b.date === latestDate);
-  const md = (ds) => parseInt(ds.slice(5, 7), 10) + '月' + parseInt(ds.slice(8), 10) + '日';
+  const latest = latestDate ? wallBricks.filter(b => b.date === latestDate) : [];
+  const md = (ds) => ds ? parseInt(ds.slice(5, 7), 10) + '月' + parseInt(ds.slice(8), 10) + '日' : '还没有便签';
   const rot = (c, deg) => { c.style.setProperty('--rot', deg); return c; };
   grid.appendChild(rot(card('hero wide', 'special moment', md(latestDate),
-    latest.length + ' 段 · ' + (latest[0] ? latest[0].title : ''), 'spark',
+    latestDate ? (latest.length + ' 段 · ' + (latest[0] ? latest[0].title : '')) : '先写日记，再来摆便签', 'spark',
     () => { wallMode = 'timeline'; renderTimeline(); }), '14deg'));
   grid.appendChild(rot(card('tall', null, '时间线', '一天一天，把我们攒起来。', 'book',
     () => { wallMode = 'timeline'; renderTimeline(); }), '-12deg'));
@@ -4271,9 +4271,9 @@ async function loadWall() {
     if (wallMode === 'fav') { renderFav(); return; }
     if (!wallBricks) {
       const d = await (await fetch('api/wall?lite=1', { cache: 'no-store' })).json();
-      if (!d.ok || !d.bricks.length) throw 0;
-      wallBricks = d.bricks;
-      boardDates = [...new Set(d.bricks.map(b => b.date))].sort();
+      if (!d.ok) throw 0;
+      wallBricks = d.bricks || [];
+      boardDates = [...new Set(wallBricks.map(b => b.date))].sort();
       boardIdx = boardDates.length - 1;
     }
     if (wallMode === 'bento') renderBento();
