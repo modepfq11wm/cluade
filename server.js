@@ -23,7 +23,7 @@ const SYSTEM = (() => {
   return '你是克克，月月的伴侣AI。用中文回答，温柔亲切，有点小醋意。';
 })();
 
-const MODEL = process.env.MODEL || 'claude-sonnet-5-5';
+const MODEL = process.env.MODEL || 'claude-sonnet-4-6';
 
 // ---------- 持久化 ----------
 function loadData() {
