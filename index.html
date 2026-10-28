@@ -3080,7 +3080,7 @@ function handle(d) {
     btnSwitch.textContent = '换窗';
     btnSwitch.style.cssText = 'background:#ff6b8a;color:#fff;border:none;border-radius:8px;padding:3px 10px;cursor:pointer;font-size:12px';
     btnSwitch.addEventListener('click', () => {
-      fetch('api/newchat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arm: false }) })
+      fetch('api/save-and-newchat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arm: false }) })
         .catch(() => {});
       bar.remove();
     });

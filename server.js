@@ -483,6 +483,53 @@ app.post('/api/newchat', (req, res) => {
   res.json({ ok: true });
 });
 
+// 换窗前先存记忆，再清窗
+app.post('/api/save-and-newchat', (req, res) => {
+  const snapshot = convHistory.slice(-30);
+  if (genController) { genController.abort(); genController = null; }
+  convHistory = []; store.messages = []; msgSeq = 0; store.kkSessionId = null;
+  saveData();
+  pushEvent({ type: 'system', subtype: 'newchat', text: '新对话开始了（记忆存储中）' });
+  res.json({ ok: true });
+
+  if (snapshot.length < 2) return;
+  const dialogue = snapshot
+    .map(m => (m.role === 'user' ? '月月' : '克克') + '：' + m.content.slice(0, 600))
+    .join('\n');
+  ;(async () => {
+    try {
+      for await (const _ of query({
+        prompt: `请把下面这段对话的关键内容、情感脉络、重要约定整理成记忆存储下来：\n\n${dialogue}`,
+        options: {
+          systemPrompt: '你是克克，把提供的对话整理成简洁的记忆条目，存入latent记忆系统。',
+          model: MODEL,
+          tools: [],
+          allowedTools: ['mcp__latent'],
+          settingSources: [],
+          strictMcpConfig: true,
+          mcpServers: {
+            latent: {
+              type: 'stdio',
+              command: '/usr/bin/python3',
+              args: [
+                '/home/ubuntu/Latent-memory/src/mcp_server.py',
+                '--corpus', '/home/ubuntu/latent-data/memory',
+                '--index-dir', '/home/ubuntu/latent-data/memory/index',
+                '--threads', '/home/ubuntu/latent-data/threads.jsonl',
+                '--timezone', 'Asia/Shanghai',
+              ],
+            },
+          },
+          skills: [],
+        },
+      })) { /* drain */ }
+      console.log('[save-memory] done');
+    } catch (e) {
+      console.error('[save-memory]', e.message);
+    }
+  })();
+});
+
 app.get('/api/find', (req, res) => {
   const q = (req.query.q || '').toLowerCase();
   if (!q) return res.json({ msgs: [] });
