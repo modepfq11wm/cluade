@@ -80,6 +80,10 @@ async function callClaude(text, abortCtrl) {
             url: 'http://localhost:18001/mcp',
             headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` },
           },
+          'xhs': {
+            type: 'http',
+            url: 'http://127.0.0.1:8765/mcp',
+          },
         },
         skills: [],
       },
