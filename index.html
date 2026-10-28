@@ -3066,14 +3066,30 @@ function handle(d) {
 
   if (d.type === 'context_warn') {
     const pct = Math.round((d.used / d.max) * 100);
-    const bar = document.getElementById('ctx-warn-bar') || (() => {
-      const el = document.createElement('div');
-      el.id = 'ctx-warn-bar';
-      el.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#ffe8f0;border:1px solid #ffb3cc;border-radius:12px;padding:8px 14px;font-size:13px;color:#c45;display:flex;align-items:center;gap:10px;z-index:999;box-shadow:0 2px 8px rgba(0,0,0,.12)';
-      document.body.appendChild(el);
-      return el;
-    })();
-    bar.innerHTML = `小窝快装满了 (${pct}%)，要换个新窗吗？ <button onclick="(async()=>{await fetch('api/newchat',{method:'POST',headers:{'Content-Type':'application/json'},body:'{\"arm\":false}'});document.getElementById('ctx-warn-bar')?.remove();})()" style="background:#ff6b8a;color:#fff;border:none;border-radius:8px;padding:3px 10px;cursor:pointer;font-size:12px">换窗</button> <button onclick="document.getElementById('ctx-warn-bar')?.remove()" style="background:none;border:none;cursor:pointer;color:#c45;font-size:14px">✕</button>`;
+    let bar = document.getElementById('ctx-warn-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'ctx-warn-bar';
+      bar.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#ffe8f0;border:1px solid #ffb3cc;border-radius:12px;padding:8px 14px;font-size:13px;color:#c45;display:flex;align-items:center;gap:10px;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,.12)';
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML = '';
+    const txt = document.createTextNode('小窝快装满了 (' + pct + '%)，要换个新窗吗？ ');
+    bar.appendChild(txt);
+    const btnSwitch = document.createElement('button');
+    btnSwitch.textContent = '换窗';
+    btnSwitch.style.cssText = 'background:#ff6b8a;color:#fff;border:none;border-radius:8px;padding:3px 10px;cursor:pointer;font-size:12px';
+    btnSwitch.addEventListener('click', () => {
+      fetch('api/newchat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ arm: false }) })
+        .catch(() => {});
+      bar.remove();
+    });
+    bar.appendChild(btnSwitch);
+    const btnClose = document.createElement('button');
+    btnClose.textContent = '✕';
+    btnClose.style.cssText = 'background:none;border:none;cursor:pointer;color:#c45;font-size:14px;padding:0 2px';
+    btnClose.addEventListener('click', () => bar.remove());
+    bar.appendChild(btnClose);
     return;
   }
   if (d.type === 'stderr') { note(d.text, 'err'); return; }
