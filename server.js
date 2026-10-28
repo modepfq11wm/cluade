@@ -169,22 +169,26 @@ const MAX_HIST = 40;
 let genController = null;
 
 async function callVision(text, imgs, abortCtrl) {
+  console.log('[vision] start, imgs:', imgs.length);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   let authHeader = {};
   if (apiKey) {
     authHeader = { 'x-api-key': apiKey };
   } else {
-    for (const cp of [path.join(homedir(), '.claude', '.credentials.json'), '/home/ubuntu/.claude/.credentials.json']) {
-      if (existsSync(cp)) {
+    const paths = [path.join(homedir(), '.claude', '.credentials.json'), '/home/ubuntu/.claude/.credentials.json'];
+    console.log('[vision] checking paths:', paths.join(', '));
+    for (const cp of paths) {
+      const exists = existsSync(cp);
+      console.log('[vision]', cp, exists ? 'exists' : 'missing');
+      if (exists) {
         try {
           const creds = JSON.parse(readFileSync(cp, 'utf8'));
-          // Try known field names first
+          console.log('[vision] creds keys:', Object.keys(creds).join(', '));
           const knownFields = ['claudeAiOauth', 'mcpOAuth', 'claudeAiOAuthToken', 'accessToken', 'oauthToken', 'apiKey', 'token', 'bearerToken', 'claude_ai_oauth_token'];
           let tok = null;
           for (const f of knownFields) {
             if (creds[f] && typeof creds[f] === 'string' && creds[f].length > 20) { tok = creds[f]; break; }
           }
-          // Fallback: try any string value long enough to be a token
           if (!tok) {
             for (const v of Object.values(creds)) {
               if (typeof v === 'string' && v.length > 30) { tok = v; break; }
@@ -194,8 +198,10 @@ async function callVision(text, imgs, abortCtrl) {
             console.log('[vision] found token, prefix:', tok.slice(0, 12));
             authHeader = tok.startsWith('sk-ant-') ? { 'x-api-key': tok } : { Authorization: `Bearer ${tok}` };
             break;
+          } else {
+            console.log('[vision] no token found in', cp);
           }
-        } catch {}
+        } catch (e) { console.error('[vision] parse error:', e.message); }
       }
     }
   }
