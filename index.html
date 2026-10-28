@@ -248,11 +248,19 @@ html[data-theme="dark"] .glass,
   .row { width: 100%; max-width: 720px; margin: 0 auto; }
   .row.me { display: flex; justify-content: flex-end; position: relative; z-index: 31; }
   .bubble {
-    background: var(--user-bubble); border-radius: 18px; padding: 10px 16px;
+    background: color-mix(in srgb, var(--user-bubble) 72%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(1.6);
+    backdrop-filter: blur(14px) saturate(1.6);
+    border-radius: 18px; padding: 10px 16px;
     max-width: 85%; white-space: pre-wrap; word-break: break-word;
   }
   .gu { white-space: pre-wrap; word-break: break-word; }
-  #log .gu { background: var(--kk-bubble); border-radius: 18px; padding: 10px 16px; max-width: 85%; }
+  #log .gu {
+    background: color-mix(in srgb, var(--kk-bubble) 72%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(1.6);
+    backdrop-filter: blur(14px) saturate(1.6);
+    border-radius: 18px; padding: 10px 16px; max-width: 85%;
+  }
   .ts { font-size: 11px; color: var(--dim); margin-top: 4px; display: block; }
   .row.me .ts { text-align: right; padding-right: 2px; }
   .row:not(.me) .ts { padding-left: 2px; }
