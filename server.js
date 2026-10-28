@@ -250,6 +250,7 @@ async function callClaude(text, abortCtrl) {
 
 // ---------- Express ----------
 app.use(express.json({ limit: '10mb' }));
+// public/ 只放 CSS/图片等资源，index.html 不要放进去
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
