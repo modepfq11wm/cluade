@@ -216,7 +216,13 @@ async function callClaude(text, abortCtrl) {
             type: 'stdio',
             command: 'npx',
             args: ['-y', '@notionhq/notion-mcp-server'],
-            env: { NOTION_API_KEY: process.env.NOTION_API_KEY },
+            env: {
+              NOTION_API_KEY: process.env.NOTION_API_KEY,
+              OPENAPI_MCP_HEADERS: JSON.stringify({
+                Authorization: `Bearer ${process.env.NOTION_API_KEY}`,
+                'Notion-Version': '2022-06-28',
+              }),
+            },
           },
         },
         skills: [],
