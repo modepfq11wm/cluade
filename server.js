@@ -78,26 +78,33 @@ const WAKEUP_DAILY_MAX = 3;                  // 每天最多醒 3 次
 let wakeupLock = false;
 
 async function wakeupClaude() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
   const recent = store.messages.slice(-10)
     .filter(m => m.kind === 'me' || m.kind === 'gu')
     .map(m => `${m.kind === 'me' ? '月月' : '克克'}：${m.text.slice(0, 200)}`)
     .join('\n');
   const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({
-      model: MODEL, max_tokens: 200,
-      system: `${SYSTEM}\n\n现在是${now}，你自己醒来了，没有月月找你。`,
-      messages: [{ role: 'user', content: `[最近的聊天：\n${recent || '（暂无）'}\n\n有没有想跟月月说的？有就直接写出来（像发消息那样），没有就回"--"，不要解释。]` }]
-    })
-  });
-  if (!resp.ok) return null;
-  const data = await resp.json();
-  const text = (data.content?.[0]?.text || '').trim();
-  return (!text || text.startsWith('--') || text.length < 3) ? null : text;
+  const prompt = `[最近的聊天：\n${recent || '（暂无）'}\n\n有没有想跟月月说的？有就直接写出来（像发消息那样），没有就回"--"，不要解释。]`;
+  let result = '';
+  for await (const ev of query({
+    prompt,
+    options: {
+      systemPrompt: `${SYSTEM}\n\n现在是${now}，你自己醒来了，没有月月找你。`,
+      model: MODEL,
+      tools: [], allowedTools: [], settingSources: [], strictMcpConfig: true,
+      mcpServers: {
+        'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
+      },
+      skills: [],
+    }
+  })) {
+    if (ev.type === 'assistant') {
+      for (const block of ev.message?.content ?? []) {
+        if (block.type === 'text') result += block.text;
+      }
+    }
+  }
+  result = result.trim();
+  return (!result || result.startsWith('--') || result.length < 3) ? null : result;
 }
 
 async function doWakeup(force = false) {
