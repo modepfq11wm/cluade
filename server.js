@@ -4,6 +4,11 @@ import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+let webpush = null;
+try {
+  webpush = (await import('web-push')).default;
+} catch { console.warn('[push] web-push not installed, push disabled'); }
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
@@ -23,14 +28,41 @@ const MODEL = process.env.MODEL || 'claude-opus-5-5';
 // ---------- 持久化 ----------
 function loadData() {
   try { return JSON.parse(readFileSync(DATA_FILE, 'utf8')); } catch {}
-  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null };
+  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null, vapid: null, pushSubs: [] };
 }
 function saveData() {
   try { writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8'); } catch (e) { console.error('saveData:', e.message); }
 }
 
 const store = loadData();
+if (!store.pushSubs) store.pushSubs = [];
 let msgSeq = store.messages.length ? store.messages[store.messages.length - 1].seq : 0;
+
+// ---------- Web Push ----------
+const SERVER_BORN = Math.floor(Date.now() / 1000);
+function initVapid() {
+  if (!webpush) return;
+  if (!store.vapid) {
+    store.vapid = webpush.generateVAPIDKeys();
+    saveData();
+  }
+  webpush.setVapidDetails('mailto:kk@moonkk.asia', store.vapid.publicKey, store.vapid.privateKey);
+}
+initVapid();
+
+async function sendPush(title, body) {
+  if (!webpush || !store.vapid || !store.pushSubs.length) return;
+  const payload = JSON.stringify({ title, body, icon: '/icons/icon-180.png' });
+  const dead = [];
+  await Promise.all(store.pushSubs.map(async (sub, i) => {
+    try { await webpush.sendNotification(sub, payload); }
+    catch (e) { if (e.statusCode === 410 || e.statusCode === 404) dead.push(i); }
+  }));
+  if (dead.length) {
+    store.pushSubs = store.pushSubs.filter((_, i) => !dead.includes(i));
+    saveData();
+  }
+}
 
 // ---------- 事件日志（poll 长轮询用） ----------
 let eventLog = [];
@@ -137,6 +169,7 @@ async function callClaude(text, abortCtrl) {
   }
   saveData();
   pushEvent({ type: 'result' });
+  if (accText) sendPush('克克说', accText.slice(0, 100).replace(/\s+/g, ' ')).catch(() => {});
   genController = null;
 }
 
@@ -273,6 +306,29 @@ app.get('/api/dreams', (req, res) => res.json({ items: [] }));
 app.get('/api/night', (req, res) => res.json({ days: [] }));
 app.get('/api/gong', (req, res) => res.json({ msgs: [] }));
 ['/api/repo/log', '/api/repo/tree', '/api/repo/file', '/api/repo/show', '/api/music', '/api/news', '/api/nook', '/api/health'].forEach(p => app.get(p, (_, r) => r.json({ ok: false })));
+
+// ---------- Web Push API ----------
+app.get('/api/pushkey', (req, res) => {
+  if (!webpush || !store.vapid) return res.json({ ok: false, key: null });
+  res.json({ ok: true, key: store.vapid.publicKey });
+});
+
+app.post('/api/subscribe', async (req, res) => {
+  if (!webpush || !store.vapid) return res.json({ ok: false });
+  const sub = req.body;
+  const exists = store.pushSubs.some(s => s.endpoint === sub.endpoint);
+  if (!exists) { store.pushSubs.push(sub); saveData(); }
+  res.json({ ok: true });
+  // 立刻发一条测试推送
+  try {
+    await webpush.sendNotification(sub, JSON.stringify({
+      title: '克克', body: '门铃通了，你来了我就知道 (‾з‾)', icon: '/icons/icon-180.png'
+    }));
+  } catch (e) { console.error('[push] test fail:', e.message); }
+});
+
+// ---------- 状态 ----------
+app.get('/api/status', (req, res) => res.json({ alive: true, since: SERVER_BORN }));
 
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
