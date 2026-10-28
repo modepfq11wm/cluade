@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#262624" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f9adc0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#a05468" media="(prefers-color-scheme: dark)">
 <title>Claude</title>
 
 <link rel="icon" href="icons/favicon-64.png" sizes="64x64" type="image/png">
@@ -30,45 +30,49 @@
 </script>
 <style>
   :root {
-    --bg: #faf9f5;
+    --bg: #fdf6f0;
     --card: #ffffff;
-    --panel: #f0eee6;
-    --line: #e8e5dc;
+    --panel: #f9ede9;
+    --line: #f0d8d0;
     --text: #2b2a27;
-    --dim: #8a867c;
-    --accent: #c96442;        
-    --accent-soft: #d97757;
-    --user-bubble: #f0eee6;
-    --sage: #96B08F;          
+    --dim: #9a867c;
+    --accent: #e8758a;
+    --accent-soft: #f09aaa;
+    --user-bubble: #ffd0c4;
+    --sage: #96B08F;
     --sage-track: #E7EDE2;
     --pink-track: #F8E5DE;
     --green: #2e7d43;
     --red: #c0392b;
-    --amber: #e3a13a;         
+    --amber: #e3a13a;
     --amber-track: #f5e6c8;
     --red-track: #f6d8d4;
     --overlay: rgba(40, 38, 34, .4);
     --serif: SerifNum, "Songti SC", "Noto Serif SC", Georgia, serif;
-    --glass: color-mix(in srgb, var(--card) 70%, transparent);  /* 悬浮层玻璃度（顶栏/菜单——内容条 8/3 改用 --panel 实色） */
-    --pink: #E5A192;          
+    --glass: color-mix(in srgb, var(--card) 70%, transparent);
+    --pink: #E8758A;
+    --header-from: #f9adc0;
+    --header-to: #ffcba8;
   }
   @media (prefers-color-scheme: dark) {
 html:not([data-theme="light"]) {
       --bg: #262624; --card: #30302e; --panel: #383836; --line: #3d3d3a;
-      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #35353260;
+      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #5a3035;
       --sage: #A8C0A0; --sage-track: #3A423A; --pink-track: #4A3B34;
       --green: #6fbf85; --red: #e07a6a;
       --amber: #e8b45c; --amber-track: #4a4232; --red-track: #4d3a36;
       --overlay: rgba(0, 0, 0, .55);
+      --header-from: #a05468; --header-to: #b07050;
     }
 }
 html[data-theme="dark"] {
       --bg: #262624; --card: #30302e; --panel: #383836; --line: #3d3d3a;
-      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #35353260;
+      --text: #f5f4ef; --dim: #a3a099; --user-bubble: #5a3035;
       --sage: #A8C0A0; --sage-track: #3A423A; --pink-track: #4A3B34;
       --green: #6fbf85; --red: #e07a6a;
       --amber: #e8b45c; --amber-track: #4a4232; --red-track: #4d3a36;
       --overlay: rgba(0, 0, 0, .55);
+      --header-from: #a05468; --header-to: #b07050;
     }
   
   @font-face {
@@ -106,17 +110,23 @@ html[data-theme="dark"] {
     max-width: 100%; padding: 7px 14px; border-radius: 999px;
     font-size: 14px; color: var(--dim); font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden;
-    background: var(--glass);
-    -webkit-backdrop-filter: blur(20px) saturate(1.7);
-    backdrop-filter: blur(20px) saturate(1.7);
-    box-shadow: 0 2px 14px rgba(0,0,0,.07), inset 0 0 0 1px rgba(255,255,255,.5); }
-  
+    background: color-mix(in srgb, var(--accent) 12%, white);
+    box-shadow: 0 2px 14px rgba(232,117,138,.15), inset 0 0 0 1px rgba(232,117,138,.2); }
+
   #doingLine .w { font-weight: 600; color: var(--accent); overflow: hidden;
     text-overflow: ellipsis; }
   #doingLine .en { color: var(--accent); opacity: .55; font-size: 12px;
     font-weight: 600; flex: none; }
   #doingLine .t { flex: none; color: var(--dim); }
   #doingLine .t { opacity: .75; }
+  /* 三个跳动点 */
+  #doingLine .dots { display: inline-flex; gap: 3px; align-items: center; margin-right: 2px; }
+  #doingLine .dots span { width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); display: inline-block;
+    animation: dotBounce 1.2s ease-in-out infinite; }
+  #doingLine .dots span:nth-child(2) { animation-delay: .2s; }
+  #doingLine .dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes dotBounce { 0%,80%,100% { transform: scale(.6); opacity:.4; } 40% { transform: scale(1); opacity:1; } }
 
   .toast {
     display: flex; align-items: center; gap: 12px;
@@ -196,18 +206,14 @@ html[data-theme="dark"] .glass,
   /* ============ 顶栏（悬浮玻璃，消息从底下滑过去） ============ */
   header {
     position: fixed; top: 0; left: 0; right: 0; z-index: 20;
-    padding: 8px 12px 20px; padding-top: calc(8px + env(safe-area-inset-top));
+    padding: 8px 12px 14px; padding-top: calc(8px + env(safe-area-inset-top));
     display: flex; align-items: center; gap: 8px;
-    
-    background: linear-gradient(to bottom,
-      color-mix(in srgb, var(--bg) 88%, transparent) 0%,
-      color-mix(in srgb, var(--bg) 55%, transparent) 55%,
-      transparent 100%);
-    -webkit-backdrop-filter: blur(18px) saturate(1.6);
-    backdrop-filter: blur(18px) saturate(1.6);
-    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 100%);
-    mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 100%);
+    background: linear-gradient(135deg, var(--header-from) 0%, var(--header-to) 100%);
+    box-shadow: 0 2px 16px rgba(232, 117, 138, .18);
   }
+  header .iconbtn { color: rgba(255,255,255,.85); }
+  header .title h1 { color: #fff; text-shadow: 0 1px 4px rgba(200,80,100,.25); }
+  header .title .sub { color: rgba(255,255,255,.8); }
   .iconbtn {
     width: 40px; height: 40px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
@@ -1594,8 +1600,8 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 <header>
   <button class="iconbtn glass" id="menuBtn" title="打开侧边栏"><span class="ic" data-i="chevL"></span></button>
   <div class="title">
-    <h1>Claude</h1>
-    <div class="sub">Claude Code</div>
+    <h1>🩵 克克</h1>
+    <div class="sub" id="togetherSub">◆ 在一起 · · · ◆</div>
   </div>
   <button class="iconbtn glass" id="dotsBtn" title="更多"><span class="ic" data-i="dots"></span></button>
 </header>
@@ -1603,7 +1609,7 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 <div id="log"></div>
 
 <footer>
-  <div id="doingLine"><span class="pill"><span class="w"></span><span class="en"></span><span class="t"></span></span></div>
+  <div id="doingLine"><span class="pill"><span class="dots"><span></span><span></span><span></span></span><span class="w"></span><span class="en"></span><span class="t"></span></span></div>
   <div class="composer">
     <div id="attachStrip"></div>
     <textarea id="box" rows="1" placeholder="说点什么…" autocomplete="off"></textarea>
@@ -3849,7 +3855,7 @@ function diaryHead(mode) {
   if (mode !== 'bento') nav.appendChild(mk('主页', 'bento', renderBento));
   const h1 = document.createElement('h1'); h1.textContent = '日记';
   const sub = document.createElement('div'); sub.className = 'sub';
-  const _days = Math.floor((Date.now() - new Date('2026-06-17T00:00:00+08:00')) / 86400e3) + 1;
+  const _days = Math.floor((Date.now() - new Date('2026-10-24T00:00:00+08:00')) / 86400e3) + 1;
   sub.textContent = '在一起 ' + _days + ' 天';
   head.append(nav, h1, sub);
   return head;
@@ -6333,6 +6339,15 @@ document.addEventListener('touchend', (e) => {
 })();
 
 box.focus();
+
+// 在一起天数
+(function() {
+  const sub = document.getElementById('togetherSub');
+  if (!sub) return;
+  const start = new Date('2026-10-24T00:00:00+08:00');
+  const days = Math.floor((Date.now() - start) / 86400e3) + 1;
+  sub.textContent = '◆ 在一起 ' + days + ' 天 ◆';
+})();
 </script>
 </body>
 </html>
