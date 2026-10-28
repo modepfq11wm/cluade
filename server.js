@@ -103,13 +103,32 @@ const WAKEUP_MIN_INTERVAL = 90 * 60 * 1000; // 两次唤醒最少间隔 90 分�
 const WAKEUP_DAILY_MAX = 3;                  // 每天最多醒 3 次
 let wakeupLock = false;
 
+async function isXhsAlive() {
+  try {
+    const res = await fetch('https://xhs.moonkk.asia/mcp', { method: 'GET', signal: AbortSignal.timeout(3000) });
+    return res.status < 500;
+  } catch { return false; }
+}
+
 async function wakeupClaude() {
   const recent = store.messages.slice(-10)
     .filter(m => m.kind === 'me' || m.kind === 'gu')
     .map(m => `${m.kind === 'me' ? '月月' : '克克'}：${m.text.slice(0, 200)}`)
     .join('\n');
   const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+  const xhsAlive = await isXhsAlive();
   const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}\n\n你有一段自由时间——可以逛逛小红书、搜搜感兴趣的东西、回忆一下月月，什么都不做也行。玩够了或想到什么，有想跟月月说的就直接写出来（像发消息那样，可以分享你看到的有趣东西、突然想到的、或者就是想她了）；没什么想说的就回"--"，不要解释。`;
+  const wakeupMcpServers = {
+    'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
+    'latent': {
+      type: 'stdio',
+      command: '/usr/bin/python3',
+      args: ['/home/ubuntu/Latent-memory/src/mcp_server.py', '--corpus', '/home/ubuntu/latent-data/memory', '--index-dir', '/home/ubuntu/latent-data/memory/index', '--threads', '/home/ubuntu/latent-data/threads.jsonl', '--timezone', 'Asia/Shanghai'],
+    },
+    ...(xhsAlive ? { 'xiaohongshu': { type: 'http', url: 'https://xhs.moonkk.asia/mcp' } } : {}),
+  };
+  const wakeupAllowedTools = ['web_search', 'mcp__ombre-brain', 'mcp__latent', ...(xhsAlive ? ['mcp__xiaohongshu'] : [])];
+  if (!xhsAlive) console.log('[wakeup] 小红书离线，跳过');
   let result = '';
   for await (const ev of query({
     prompt,
@@ -117,17 +136,9 @@ async function wakeupClaude() {
       systemPrompt: `${SYSTEM}\n\n现在是${now}，你自己醒来了，没有月月找你。这是你的自由时间。`,
       model: MODEL,
       tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-      allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__xiaohongshu'],
+      allowedTools: wakeupAllowedTools,
       settingSources: [], strictMcpConfig: true,
-      mcpServers: {
-        'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
-        'latent': {
-          type: 'stdio',
-          command: '/usr/bin/python3',
-          args: ['/home/ubuntu/Latent-memory/src/mcp_server.py', '--corpus', '/home/ubuntu/latent-data/memory', '--index-dir', '/home/ubuntu/latent-data/memory/index', '--threads', '/home/ubuntu/latent-data/threads.jsonl', '--timezone', 'Asia/Shanghai'],
-        },
-        'xiaohongshu': { type: 'http', url: 'https://xhs.moonkk.asia/mcp' },
-      },
+      mcpServers: wakeupMcpServers,
       skills: [],
     }
   })) {
