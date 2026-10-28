@@ -312,8 +312,8 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 
 `,
         model: MODEL,
-        tools: [],
-        allowedTools: ['mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now'],
+        tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
