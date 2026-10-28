@@ -245,7 +245,7 @@ async function callVision(text, imgs, abortCtrl) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { ...authHeader, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 1024, system: SYSTEM, messages: [{ role: 'user', content }] }),
+        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, messages: [{ role: 'user', content }] }),
         signal: abortCtrl.signal,
       });
       if (res.status === 429) {
