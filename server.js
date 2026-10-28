@@ -388,6 +388,13 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
   saveData();
   pushEvent({ type: 'result' });
   if (accText) sendPush('克克说', accText.slice(0, 100).replace(/\s+/g, ' ')).catch(() => {});
+
+  // 主动检测上下文，快满了提醒月月换窗
+  const histLen = convHistory.length;
+  if (histLen >= MAX_HIST - 4) {
+    pushEvent({ type: 'context_warn', used: histLen, max: MAX_HIST });
+  }
+
   genController = null;
 }
 
