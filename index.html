@@ -234,11 +234,16 @@ html[data-theme="dark"] .glass,
 
   /* ============ 消息流 ============ */
   
+  body::before {
+    content: ''; position: fixed; inset: 0; z-index: 0;
+    background: url(bg.png) center/cover no-repeat;
+    pointer-events: none;
+  }
   #log {
     flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
     padding: calc(76px + env(safe-area-inset-top)) 18px 150px;
     display: flex; flex-direction: column; gap: 18px;
-    background: url(bg.png) center/cover no-repeat fixed;
+    position: relative; z-index: 1;
   }
   /* 顶上那颗「看更早的」——老账都在，按一下捞 400 行 */
   #olderBtn {
