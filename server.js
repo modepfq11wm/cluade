@@ -90,9 +90,10 @@ async function wakeupClaude() {
     options: {
       systemPrompt: `${SYSTEM}\n\n现在是${now}，你自己醒来了，没有月月找你。`,
       model: MODEL,
-      tools: [], allowedTools: [], settingSources: [], strictMcpConfig: true,
+      tools: [], allowedTools: ['mcp__xhs', 'mcp__ombre-brain'], settingSources: [], strictMcpConfig: true,
       mcpServers: {
         'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
+        'xhs': { type: 'http', url: 'http://127.0.0.1:8765/mcp' },
       },
       skills: [],
     }
