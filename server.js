@@ -136,7 +136,7 @@ async function callClaude(text, abortCtrl) {
     if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
   }
   saveData();
-  pushEvent({ type: 'done' });
+  pushEvent({ type: 'result' });
   genController = null;
 }
 
