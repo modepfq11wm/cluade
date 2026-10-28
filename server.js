@@ -167,11 +167,15 @@ let convHistory = [];
 const MAX_HIST = 40;
 let genController = null;
 
-async function callClaude(text, abortCtrl) {
-  convHistory.push({ role: 'user', content: text });
+async function callClaude(text, attachments, abortCtrl) {
+  const imgs = (attachments || []).filter(a => a.kind === 'image');
+  const imgNote = imgs.length ? `\n[月月发了${imgs.length}张图片，你看不到内容，可以回应一下她发图这件事]` : '';
+  const prompt = text + imgNote;
+  convHistory.push({ role: 'user', content: prompt });
   if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
 
-  store.messages.push({ seq: ++msgSeq, kind: 'me', text, at: Date.now() });
+  const displayText = [imgs.map(() => '[图片]').join(' '), text].filter(Boolean).join(' ');
+  store.messages.push({ seq: ++msgSeq, kind: 'me', text: displayText, at: Date.now() });
   saveData();
 
   let accText = '', accThink = '', memStored = false;
@@ -179,7 +183,7 @@ async function callClaude(text, abortCtrl) {
   try {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     for await (const ev of query({
-      prompt: text,
+      prompt,
       options: {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
@@ -315,9 +319,11 @@ app.get('/api/poll', (req, res) => {
 
 app.post('/api/send', (req, res) => {
   const text = (req.body.text || '').trim();
+  const attachments = Array.isArray(req.body.attachments) ? req.body.attachments : [];
   res.json({ ok: true });
-  if (!text) return;
-  pushEvent({ type: 'echo', text });
+  if (!text && !attachments.length) return;
+  const images = attachments.filter(a => a.kind === 'image').map(a => ({ data: a.data, media_type: a.media_type }));
+  pushEvent({ type: 'echo', text, images: images.length ? images : undefined });
   if (genController) { genController.abort(); genController = null; }
   genController = new AbortController();
   const ctrl = genController;
@@ -328,7 +334,7 @@ app.post('/api/send', (req, res) => {
       pushEvent({ type: 'result' });
     }
   }, 90000);
-  callClaude(text, ctrl).catch(console.error).finally(() => clearTimeout(killTimer));
+  callClaude(text, attachments, ctrl).catch(console.error).finally(() => clearTimeout(killTimer));
 });
 
 app.post('/api/stop', (req, res) => {

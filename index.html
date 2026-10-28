@@ -2107,11 +2107,21 @@ function addTs(r, text) {
   t.textContent = text;
   r.appendChild(t);
 }
-function addMe(text, ts) {
+function addMe(text, ts, images) {
   const r = row('me');
   const b = document.createElement('div');
   b.className = 'bubble';
-  b.textContent = text;
+  if (images && images.length) {
+    images.forEach(img => {
+      const el = document.createElement('img');
+      el.className = 'chatimg';
+      el.src = 'data:' + img.media_type + ';base64,' + img.data;
+      b.appendChild(el);
+    });
+    if (text) { const t = document.createElement('div'); t.textContent = text; b.appendChild(t); }
+  } else {
+    b.textContent = text;
+  }
   r.appendChild(b);
   addTs(r, ts || nowTs());
   renderRich(b);
@@ -2954,7 +2964,7 @@ setInterval(calDayWatch, 120000);
 
 function handle(d) {
   lastEventAt = Date.now();
-  if (d.type === 'echo') { if (armedFresh) setArmed(false); addMe(d.text); petSet('thinking'); return; }
+  if (d.type === 'echo') { if (armedFresh) setArmed(false); addMe(d.text, undefined, d.images); petSet('thinking'); return; }
   if (d.type === 'system' && d.subtype === 'newchat') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'switched') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
 
