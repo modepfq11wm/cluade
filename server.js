@@ -399,8 +399,48 @@ async function syncDiaryToNotion(date, text) {
   } catch (e) { console.error('[notion-diary]', e.message); }
 }
 
+// ---------- 从 Notion 拉日记 ----------
+let notionDiaryCache = null, notionDiaryCacheAt = 0;
+
+async function fetchNotionDiaries() {
+  if (notionDiaryCache && Date.now() - notionDiaryCacheAt < 60000) return notionDiaryCache;
+  const search = await notionReq('POST', '/search', {
+    query: '日记',
+    filter: { property: 'object', value: 'page' },
+    sort: { direction: 'descending', timestamp: 'last_edited_time' },
+    page_size: 50,
+  });
+  const pages = (search?.results || []).filter(p => {
+    const t = p.properties?.title?.title?.[0]?.plain_text || '';
+    const parentId = (p.parent?.page_id || '').replace(/-/g, '');
+    return /^\d{4}\.\d{2}\.\d{2} 日记$/.test(t) && parentId === NOTION_PARENT_ID;
+  });
+  const items = (await Promise.all(pages.map(async p => {
+    const title = p.properties.title.title[0].plain_text;
+    const date = title.slice(0, 10).replace(/\./g, '-');
+    const at = Math.floor(new Date(p.last_edited_time).getTime() / 1000);
+    try {
+      const blocks = await notionReq('GET', `/blocks/${p.id}/children`);
+      const text = (blocks?.results || [])
+        .map(b => (b.paragraph?.rich_text || []).map(t => t.plain_text).join(''))
+        .filter(Boolean).join('\n');
+      return text ? { date, text, at } : null;
+    } catch { return null; }
+  }))).filter(Boolean);
+  items.sort((a, b) => b.at - a.at);
+  notionDiaryCache = items;
+  notionDiaryCacheAt = Date.now();
+  return items;
+}
+
 // ---------- 她的日记 ----------
-app.get('/api/herdiary', (req, res) => res.json({ items: store.herdiary }));
+app.get('/api/herdiary', async (req, res) => {
+  if (process.env.NOTION_API_KEY) {
+    try { return res.json({ items: await fetchNotionDiaries() }); }
+    catch (e) { console.error('[notion-diary-fetch]', e.message); }
+  }
+  res.json({ items: store.herdiary });
+});
 app.post('/api/herdiary', (req, res) => {
   const { text, date } = req.body;
   if (text != null) {
@@ -408,6 +448,7 @@ app.post('/api/herdiary', (req, res) => {
     const i = store.herdiary.findIndex(e => e.date === d);
     if (i >= 0) store.herdiary[i].text = text; else store.herdiary.push({ date: d, text, at: Math.floor(Date.now() / 1000) });
     saveData();
+    notionDiaryCache = null; // 写完清缓存，下次 GET 重拉
     syncDiaryToNotion(d, text).catch(() => {});
   }
   res.json({ ok: true });
