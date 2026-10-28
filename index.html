@@ -4334,7 +4334,7 @@ async function renderWhisper() {
     if (!t) return;
     btn.textContent = '…';
     try {
-      await fetch('api/whisper', { method: 'POST', body: JSON.stringify({ text: t }) });
+      await fetch('api/whisper', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t }) });
       ta.value = ''; ta.style.height = '';
       renderWhisper();
     } catch (e) { btn.textContent = '放进去'; }
@@ -5049,7 +5049,7 @@ async function todoAct(payload) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    renderTodos(await r.json());
+    loadTodos();
   } catch { note('（没记上，再试一次）', 'err'); }
 }
 function nowHM() {
@@ -5086,7 +5086,7 @@ function todoRow(t, list, canTouch) {
   box.innerHTML = t.done
     ? '<svg viewBox="0 0 20 20" width="20" height="20"><rect x="1.5" y="1.5" width="17" height="17" rx="5.5" fill="var(--sage)"/><path d="M6 10.4l2.7 2.7 5.4-5.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
     : '<svg viewBox="0 0 20 20" width="20" height="20"><rect x="1.5" y="1.5" width="17" height="17" rx="5.5" fill="none" stroke="currentColor" stroke-width="1.8" opacity=".45"/></svg>';
-  if (canTouch) box.onclick = () => todoAct({ action: 'toggle', list, id: t.id });
+  if (canTouch) box.onclick = () => todoAct({ action: 'done', side: list, id: t.id, done: !t.done });
   else { box.disabled = true; box.style.opacity = '.6'; }
   const tx = document.createElement('div');
   tx.className = 'tx';
@@ -5109,7 +5109,7 @@ function todoRow(t, list, canTouch) {
     const del = document.createElement('button');
     del.className = 'hx';
     del.appendChild(icEl('trash', 15));
-    del.onclick = () => todoAct({ action: 'del', list, id: t.id });
+    del.onclick = () => todoAct({ action: 'del', side: list, id: t.id });
     r.appendChild(del);
   }
   return r;
@@ -5117,7 +5117,7 @@ function todoRow(t, list, canTouch) {
 function renderTodos(d) {
   const keepTop = todoBody.scrollTop;
   const dt = new Date(Date.now() + (8 * 60 + new Date().getTimezoneOffset()) * 60000);
-  const total = d.hers.length, paid = d.hers.filter(t => t.done).length;
+  const total = (d.yours || []).length, paid = (d.yours || []).filter(t => t.done).length;
   const pct = total ? paid / total : 0;
 
   todoBody.innerHTML = '';
@@ -5151,8 +5151,8 @@ function renderTodos(d) {
   todoBody.appendChild(sect('\u8001\u5a46\u7684'));
   const c1 = document.createElement('div');
   c1.className = 'hcard';
-  if (!d.hers.length) c1.appendChild(emptyRow('\u7a7a\u7684\u2014\u2014\u7b49\u8001\u516c\u5e03\u7f6e\uff0c\u6216\u8005\u81ea\u5df1\u5199\u4e00\u6761'));
-  else sortTodos(d.hers).forEach(t => c1.appendChild(todoRow(t, 'hers', true)));
+  if (!(d.yours || []).length) c1.appendChild(emptyRow('\u7a7a\u7684\u2014\u2014\u7b49\u8001\u516c\u5e03\u7f6e\uff0c\u6216\u8005\u81ea\u5df1\u5199\u4e00\u6761'));
+  else sortTodos(d.yours || []).forEach(t => c1.appendChild(todoRow(t, 'yours', true)));
 
   const plus = document.createElement('button');
   plus.className = 'hplus';
@@ -5175,7 +5175,7 @@ function renderTodos(d) {
     const v = inp.value.trim();
     if (!v) return;
     inp.value = '';
-    todoAct({ action: 'add', list: 'hers', text: v, by: 'her', at: tm.value, fixed: dailyOn });
+    todoAct({ action: 'add', side: 'yours', text: v, by: 'her', at: tm.value, fixed: dailyOn });
     tm.value = ''; dailyOn = false; daily.classList.remove('on');
     add.classList.remove('open'); plus.style.display = '';
   };
@@ -5190,8 +5190,8 @@ function renderTodos(d) {
   todoBody.appendChild(sect('\u987e\u5c7f\u7684\u6d3b'));
   const c2 = document.createElement('div');
   c2.className = 'hcard';
-  if (!d.mine.length) c2.appendChild(emptyRow('\u4ed6\u8fd9\u4f1a\u513f\u624b\u4e0a\u6ca1\u6302\u7740\u6d3b'));
-  else sortTodos(d.mine).forEach(t => c2.appendChild(todoRow(t, 'mine', false)));
+  if (!(d.mine || []).length) c2.appendChild(emptyRow('\u4ed6\u8fd9\u4f1a\u513f\u624b\u4e0a\u6ca1\u6302\u7740\u6d3b'));
+  else sortTodos(d.mine || []).forEach(t => c2.appendChild(todoRow(t, 'mine', false)));
   todoBody.appendChild(c2);
 
   const foot = document.createElement('div');

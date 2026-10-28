@@ -325,7 +325,7 @@ app.get('/api/todos', (req, res) => res.json({ ok: true, mine: store.todos.mine,
 app.post('/api/todos', (req, res) => {
   const b = req.body;
   const list = b.side === 'yours' ? store.todos.yours : store.todos.mine;
-  if (b.action === 'add') list.push({ id: Date.now(), text: b.text, done: false, at: b.at || '' });
+  if (b.action === 'add') list.push({ id: Date.now(), text: b.text, done: false, at: b.at || '', by: b.by || 'her', fixed: !!b.fixed, created: Math.floor(Date.now() / 1000) });
   else if (b.action === 'done') { const t = list.find(t => t.id === b.id); if (t) t.done = !!b.done; }
   else if (b.action === 'del') {
     if (b.side === 'yours') store.todos.yours = store.todos.yours.filter(t => t.id !== b.id);
@@ -450,8 +450,13 @@ async function fetchNotionDiaries() {
 // ---------- 她的日记 ----------
 app.get('/api/herdiary', async (req, res) => {
   if (process.env.NOTION_API_KEY) {
-    try { return res.json({ items: await fetchNotionDiaries() }); }
-    catch (e) { console.error('[notion-diary-fetch]', e.message); }
+    try {
+      const notionItems = await fetchNotionDiaries();
+      const notionDates = new Set(notionItems.map(i => i.date));
+      const localOnly = store.herdiary.filter(i => !notionDates.has(i.date));
+      const items = [...notionItems, ...localOnly].sort((a, b) => b.at - a.at);
+      return res.json({ items });
+    } catch (e) { console.error('[notion-diary-fetch]', e.message); }
   }
   res.json({ items: store.herdiary });
 });
