@@ -1,5 +1,6 @@
 import express from 'express';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { homedir } from 'os';
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -167,21 +168,46 @@ let convHistory = [];
 const MAX_HIST = 40;
 let genController = null;
 
+async function callVision(text, imgs, abortCtrl) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  let authHeader = {};
+  if (apiKey) {
+    authHeader = { 'x-api-key': apiKey };
+  } else {
+    for (const cp of [path.join(homedir(), '.claude', '.credentials.json'), '/home/ubuntu/.claude/.credentials.json']) {
+      if (existsSync(cp)) {
+        try {
+          const creds = JSON.parse(readFileSync(cp, 'utf8'));
+          const tok = creds.claudeAiOAuthToken || creds.accessToken;
+          if (tok) { authHeader = { Authorization: `Bearer ${tok}` }; break; }
+        } catch {}
+      }
+    }
+  }
+  if (!Object.keys(authHeader).length) return null;
+
+  const content = [
+    ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } })),
+    ...(text ? [{ type: 'text', text }] : []),
+  ];
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { ...authHeader, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, messages: [{ role: 'user', content }] }),
+      signal: abortCtrl.signal,
+    });
+    if (!res.ok) { console.error('[vision]', res.status, await res.text()); return null; }
+    const data = await res.json();
+    return data.content?.find(b => b.type === 'text')?.text || null;
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error('[vision]', e.message);
+    return null;
+  }
+}
+
 async function callClaude(text, attachments, abortCtrl) {
   const imgs = (attachments || []).filter(a => a.kind === 'image');
-
-  let prompt;
-  if (imgs.length > 0) {
-    const blocks = [];
-    for (const img of imgs) {
-      blocks.push({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } });
-    }
-    if (text) blocks.push({ type: 'text', text });
-    prompt = blocks;
-  } else {
-    prompt = text;
-  }
-
   const displayText = [imgs.map(() => '[图片]').join(' '), text].filter(Boolean).join(' ');
   convHistory.push({ role: 'user', content: displayText });
   if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
@@ -190,11 +216,23 @@ async function callClaude(text, attachments, abortCtrl) {
   saveData();
 
   let accText = '', accThink = '', memStored = false;
+
+  if (imgs.length > 0) {
+    accText = await callVision(text, imgs, abortCtrl) || '';
+    if (accText) {
+      const chunks = accText.match(/[^\s]*\s*/g) || [accText];
+      for (const chunk of chunks) {
+        if (!chunk || abortCtrl.signal.aborted) continue;
+        pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: chunk } } });
+        await new Promise(r => setImmediate(r));
+      }
+    }
+  } else {
   const MEM_TOOLS = new Set(['breath', 'anchor', 'hold', 'grow', 'dream', 'feel', 'trace']);
   try {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     for await (const ev of query({
-      prompt,
+      prompt: text,
       options: {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
@@ -282,6 +320,8 @@ async function callClaude(text, attachments, abortCtrl) {
     pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: ' ⭐' } } });
     accText += ' ⭐';
   }
+  } // end else (text path)
+
   if (accThink) store.messages.push({ seq: ++msgSeq, kind: 'think', text: accThink, at: Date.now() });
   if (accText) {
     store.messages.push({ seq: ++msgSeq, kind: 'gu', text: accText, at: Date.now() });
