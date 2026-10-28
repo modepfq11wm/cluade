@@ -182,7 +182,7 @@ function pushEvent(ev) {
 
 // ---------- 对话状态 ----------
 let convHistory = [];
-const MAX_HIST = 40;
+const MAX_HIST = 80;
 let genController = null;
 
 async function callVision(text, imgs, abortCtrl) {
