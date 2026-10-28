@@ -1648,10 +1648,25 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 
 <div class="menuCard" id="dotsMenu">
   <button class="mi" data-act="find"><span class="ic" data-i="search"></span>搜索</button>
+  <button class="mi" data-act="footprints"><span class="ic" data-i="activity"></span>克克的足迹</button>
   <button class="mi" data-act="ctx"><span class="ic" data-i="gauge"></span>容量</button>
   <button class="mi" data-act="rename"><span class="ic" data-i="tag"></span>备注</button>
   <button class="mi danger" data-act="archive"><span class="ic" data-i="box"></span>收纳</button>
   <button class="mi" data-act="settings"><span class="ic" data-i="sliders"></span>设置</button>
+</div>
+
+<!-- 克克的足迹 -->
+<div class="sheetWrap" id="footprintsSheet">
+  <div class="shade" data-close="footprints"></div>
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="head">
+      <button class="hbtn" data-close="footprints"><span class="ic" data-i="x"></span></button>
+      <div class="ht" style="font-family:var(--serif)">克克的足迹</div>
+      <div class="hspace"></div>
+    </div>
+    <div class="body" id="footprintsBody"></div>
+  </div>
 </div>
 
 <!-- 留言板：冰箱门 -->
@@ -3510,7 +3525,32 @@ const sheets = {
   health: document.getElementById('healthSheet'),
   gong: document.getElementById('gongSheet'),
   repo: document.getElementById('repoSheet'),
+  footprints: document.getElementById('footprintsSheet'),
 };
+
+const footprintsBody = document.getElementById('footprintsBody');
+async function loadFootprints() {
+  footprintsBody.innerHTML = '<div style="text-align:center;color:var(--dim);padding:32px 0;font-size:14px">加载中…</div>';
+  try {
+    const { logs } = await (await fetch('api/wakeup-logs')).json();
+    if (!logs.length) {
+      footprintsBody.innerHTML = '<div style="text-align:center;color:var(--dim);padding:40px 0;font-size:14px;font-family:var(--serif)">克克还没有自由时间的记录</div>';
+      return;
+    }
+    const toolLabel = { web_search: '搜了', search_notes: '逛了小红书', list_feeds: '刷了小红书', get_note_content: '看了一条' };
+    footprintsBody.innerHTML = logs.map(log => {
+      const d = new Date(log.at);
+      const time = d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const toolLines = (log.tools || []).map(t => {
+        const label = toolLabel[t.tool] || t.tool;
+        const detail = t.input?.query || t.input?.keyword || t.input?.url || '';
+        return `<span style="display:inline-block;background:var(--panel);border-radius:8px;padding:2px 9px;margin:3px 3px 0 0;font-size:13px;color:var(--dim)">${label}${detail ? ' "' + detail.slice(0, 30) + '"' : ''}</span>`;
+      }).join('');
+      const said = log.said ? `<div style="margin-top:10px;padding:10px 12px;background:var(--kk-bubble);border-radius:12px;font-size:14.5px;line-height:1.7">${log.said.slice(0, 200)}${log.said.length > 200 ? '…' : ''}</div>` : `<div style="margin-top:8px;font-size:13px;color:var(--dim)">玩了玩，没说话</div>`;
+      return `<div style="padding:14px 0;border-bottom:1px solid var(--line)"><div style="font-size:12px;color:var(--dim);margin-bottom:6px">${time}</div><div>${toolLines || '<span style="font-size:13px;color:var(--dim)">没用工具，只是发呆</span>'}</div>${said}</div>`;
+    }).join('');
+  } catch { footprintsBody.innerHTML = '<div style="text-align:center;color:var(--dim);padding:32px 0;font-size:14px">加载失败</div>'; }
+}
 
 const notesBody = document.getElementById('notesBody');
 let notesData = null, notesTab = 'gu';
@@ -5403,6 +5443,7 @@ dotsMenu.querySelectorAll('.mi').forEach(b => b.onclick = async () => {
     } catch { note('（没收成）', 'err'); }
   }
   if (act === 'find') openFind();
+  if (act === 'footprints') { sheets.footprints.classList.add('open'); loadFootprints(); }
   if (act === 'notes') { sheets.notes.classList.add('open'); loadNotes(true); }
   if (act === 'status') {
     try {

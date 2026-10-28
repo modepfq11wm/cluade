@@ -48,7 +48,7 @@ const SYSTEM = (() => {
 // ---------- 持久化 ----------
 function loadData() {
   try { return JSON.parse(readFileSync(DATA_FILE, 'utf8')); } catch {}
-  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], calDays: {}, notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null, vapid: null, pushSubs: [], wakeupEnabled: false, lastWakeup: 0, wakeupCount: 0 };
+  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], calDays: {}, notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null, vapid: null, pushSubs: [], wakeupEnabled: false, lastWakeup: 0, wakeupCount: 0, wakeupLogs: [] };
 }
 function saveData() {
   try { writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8'); } catch (e) { console.error('saveData:', e.message); }
@@ -58,6 +58,7 @@ const store = loadData();
 let MODEL = process.env.MODEL || store.selectedModel || 'claude-sonnet-4-6';
 if (!store.pushSubs) store.pushSubs = [];
 if (!store.wakeupCount) store.wakeupCount = 0;
+if (!store.wakeupLogs) store.wakeupLogs = [];
 if (!store.calDays) store.calDays = {};
 if (!store.cal) store.cal = [];
 if (!store.todos) store.todos = { mine: [], yours: [] };
@@ -130,6 +131,7 @@ async function wakeupClaude() {
   const wakeupAllowedTools = ['web_search', 'mcp__ombre-brain', 'mcp__latent', ...(xhsAlive ? ['mcp__xiaohongshu'] : [])];
   if (!xhsAlive) console.log('[wakeup] 小红书离线，跳过');
   let result = '';
+  const toolLog = [];
   for await (const ev of query({
     prompt,
     options: {
@@ -145,11 +147,19 @@ async function wakeupClaude() {
     if (ev.type === 'assistant') {
       for (const block of ev.message?.content ?? []) {
         if (block.type === 'text') result += block.text;
+        if (block.type === 'tool_use') {
+          const summary = { tool: block.name, input: {} };
+          if (block.input?.query) summary.input.query = block.input.query;
+          if (block.input?.keyword) summary.input.keyword = block.input.keyword;
+          if (block.input?.url) summary.input.url = block.input.url;
+          toolLog.push(summary);
+        }
       }
     }
   }
   result = result.trim();
-  return (!result || result.startsWith('--') || result.length < 3) ? null : result;
+  const text = (!result || result.startsWith('--') || result.length < 3) ? null : result;
+  return { text, tools: toolLog };
 }
 
 async function doWakeup(force = false) {
@@ -162,7 +172,10 @@ async function doWakeup(force = false) {
   store.wakeupCount = (store.wakeupCount || 0) + 1;
   saveData();
   try {
-    const msg = await wakeupClaude();
+    const { text: msg, tools } = await wakeupClaude();
+    const logEntry = { at: Date.now(), tools, said: msg || null };
+    store.wakeupLogs.unshift(logEntry);
+    if (store.wakeupLogs.length > 30) store.wakeupLogs = store.wakeupLogs.slice(0, 30);
     if (msg) {
       store.messages.push({ seq: ++msgSeq, kind: 'gu', text: msg, at: Date.now() });
       convHistory.push({ role: 'assistant', content: msg });
@@ -173,6 +186,7 @@ async function doWakeup(force = false) {
       sendPush('克克', msg.slice(0, 100).replace(/\s+/g, ' ')).catch(() => {});
       return { ok: true, sent: true };
     }
+    saveData();
     return { ok: true, sent: false };
   } catch (e) {
     console.error('[wakeup]', e.message);
@@ -827,6 +841,9 @@ app.post('/api/wakeup', async (req, res) => {
   res.json({ ok: true });
   doWakeup().catch(() => {});
 });
+
+// ---------- 克克的足迹 ----------
+app.get('/api/wakeup-logs', (req, res) => res.json({ logs: store.wakeupLogs || [] }));
 
 // ---------- 状态 ----------
 app.get('/api/status', (req, res) => res.json({ alive: true, since: SERVER_BORN }));
