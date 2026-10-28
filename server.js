@@ -178,8 +178,23 @@ async function callVision(text, imgs, abortCtrl) {
       if (existsSync(cp)) {
         try {
           const creds = JSON.parse(readFileSync(cp, 'utf8'));
-          const tok = creds.claudeAiOAuthToken || creds.accessToken;
-          if (tok) { authHeader = { Authorization: `Bearer ${tok}` }; break; }
+          // Try known field names first
+          const knownFields = ['claudeAiOAuthToken', 'accessToken', 'oauthToken', 'apiKey', 'token', 'bearerToken', 'claude_ai_oauth_token'];
+          let tok = null;
+          for (const f of knownFields) {
+            if (creds[f] && typeof creds[f] === 'string' && creds[f].length > 20) { tok = creds[f]; break; }
+          }
+          // Fallback: try any string value long enough to be a token
+          if (!tok) {
+            for (const v of Object.values(creds)) {
+              if (typeof v === 'string' && v.length > 30) { tok = v; break; }
+            }
+          }
+          if (tok) {
+            console.log('[vision] found token, prefix:', tok.slice(0, 12));
+            authHeader = tok.startsWith('sk-ant-') ? { 'x-api-key': tok } : { Authorization: `Bearer ${tok}` };
+            break;
+          }
         } catch {}
       }
     }
