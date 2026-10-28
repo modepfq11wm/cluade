@@ -23,7 +23,7 @@ const SYSTEM = (() => {
   return '你是克克，月月的伴侣AI。用中文回答，温柔亲切，有点小醋意。';
 })();
 
-const MODEL = process.env.MODEL || 'claude-sonnet-4-6';
+let MODEL = process.env.MODEL || store.selectedModel || 'claude-sonnet-4-6';
 
 // ---------- 持久化 ----------
 function loadData() {
@@ -38,6 +38,10 @@ const store = loadData();
 if (!store.pushSubs) store.pushSubs = [];
 if (!store.wakeupCount) store.wakeupCount = 0;
 if (!store.calDays) store.calDays = {};
+if (!store.cal) store.cal = [];
+if (!store.todos) store.todos = { mine: [], yours: [] };
+if (!store.todos.mine) store.todos.mine = [];
+if (!store.todos.yours) store.todos.yours = [];
 
 // 每天零点重置今日醒来次数
 (function scheduleReset() {
@@ -322,6 +326,16 @@ app.get('/api/find', (req, res) => {
 
 // ---------- 元信息 ----------
 app.get('/api/model', (req, res) => res.json({ name: MODEL, effort: 'high' }));
+app.post('/api/model', (req, res) => {
+  const { model, effort } = req.body || {};
+  if (model) { MODEL = model; store.selectedModel = model; saveData(); }
+  // 中断当前生成，让下一轮用新模型
+  if (genController && !genController.signal.aborted) genController.abort();
+  // 清掉 session，强制重开
+  store.kkSessionId = null; saveData();
+  pushEvent({ type: 'system', subtype: 'model', model: MODEL, effort: effort || 'high' });
+  res.json({ ok: true, model: MODEL });
+});
 app.get('/api/context', (req, res) => {
   const chars = store.messages.reduce((s, m) => s + (m.text || '').length, 0);
   res.json({ used: Math.floor(chars / 4), max: 200000 });
