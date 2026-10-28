@@ -179,7 +179,7 @@ async function callVision(text, imgs, abortCtrl) {
         try {
           const creds = JSON.parse(readFileSync(cp, 'utf8'));
           // Try known field names first
-          const knownFields = ['claudeAiOAuthToken', 'accessToken', 'oauthToken', 'apiKey', 'token', 'bearerToken', 'claude_ai_oauth_token'];
+          const knownFields = ['claudeAiOauth', 'mcpOAuth', 'claudeAiOAuthToken', 'accessToken', 'oauthToken', 'apiKey', 'token', 'bearerToken', 'claude_ai_oauth_token'];
           let tok = null;
           for (const f of knownFields) {
             if (creds[f] && typeof creds[f] === 'string' && creds[f].length > 20) { tok = creds[f]; break; }
