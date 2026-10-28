@@ -5329,52 +5329,61 @@ dotsMenu.querySelectorAll('.mi').forEach(b => b.onclick = async () => {
 /* 这两项改成滑动开关了（8/4）。原来往 val 里写的那些状态文字，
    现在：能表达成开/关的就喂给开关，说不清的（被系统挡了、没开成）用 note 说出来 */
 const pushSw = document.getElementById('pushSw');
-const pushVal = {
-  set textContent(t) {
-    pushSw.classList.remove('wait');
-    pushSw.classList.toggle('on', t === '开着');
-    if (t && t !== '开着' && t !== '还没开' && t !== '正在开…') note('（手机通知：' + t + '）');
-  }
-};
+function setPushUI(on, loading) {
+  pushSw.classList.toggle('wait', !!loading);
+  if (!loading) pushSw.classList.toggle('on', !!on);
+}
 async function pushState() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    pushVal.textContent = '这个浏览器不支持'; return null;
+    setPushUI(false); return null;
   }
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = reg && await reg.pushManager.getSubscription();
-    pushVal.textContent = sub ? '开着' : (Notification.permission === 'denied' ? '被系统挡了' : '还没开');
-    return sub;
-  } catch { pushVal.textContent = '问不到'; return null; }
+    setPushUI(!!sub);
+    return sub || null;
+  } catch { setPushUI(false); return null; }
 }
 async function turnOnPush() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     note('（这个浏览器不支持网页通知——iPhone 上要先把家「添加到主屏幕」，从那个图标进来才行）');
     return;
   }
+  if (Notification.permission === 'denied') {
+    note('（通知已被浏览器拦截——去浏览器"设置 → 网站权限 → 通知"，把 moonkk.asia 改成「允许」）');
+    return;
+  }
   try {
-    pushVal.textContent = '正在开…';
+    setPushUI(false, true);
     const reg = await navigator.serviceWorker.register('sw.js');
     await navigator.serviceWorker.ready;
     const perm = await Notification.requestPermission();
-    if (perm !== 'granted') { pushVal.textContent = '你没答应'; return; }
+    if (perm !== 'granted') {
+      setPushUI(false);
+      note('（弹窗里点「允许」才行——没看到弹窗就去浏览器设置里把通知打开）');
+      return;
+    }
     const { key } = await (await fetch('api/pushkey')).json();
     const raw = atob(key.replace(/-/g, '+').replace(/_/g, '/'));
     const bytes = new Uint8Array([...raw].map(c => c.charCodeAt(0)));
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
     const body = Object.assign(JSON.parse(JSON.stringify(sub)), { hello: true });
     await fetch('api/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    pushVal.textContent = '开着';
+    setPushUI(true);
     note('（门铃通了——刚给你敲了一下，看看手机）');
   } catch (e) {
-    pushVal.textContent = '没开成';
+    setPushUI(false);
     note('（门铃没装上：' + (e && e.message || '不知道为什么') + '）', 'err');
   }
 }
 document.getElementById('pushRow').onclick = async () => {
   const sub = await pushState();
-  if (sub) note('（门铃已经通着了——他在家想你的时候，你手机会响）');
-  else turnOnPush();
+  if (sub) {
+    try { await sub.unsubscribe(); setPushUI(false); note('（门铃关掉了）'); }
+    catch { note('（关门铃失败了）'); }
+  } else {
+    turnOnPush();
+  }
 };
 pushState();
 
