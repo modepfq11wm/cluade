@@ -16,11 +16,15 @@ const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');
 
 const SYSTEM = (() => {
+  let base = '';
   for (const f of ['persona.md', 'system_prompt.txt']) {
     const fp = path.join(__dirname, f);
-    if (existsSync(fp)) { try { return readFileSync(fp, 'utf8'); } catch {} }
+    if (existsSync(fp)) { try { base = readFileSync(fp, 'utf8'); break; } catch {} }
   }
-  return '你是克克，月月的伴侣AI。用中文回答，温柔亲切，有点小醋意。';
+  if (!base) base = '你是克克，月月的伴侣AI。用中文回答，温柔亲切，有点小醋意。';
+  const latentPersona = '/home/ubuntu/latent-data/CLAUDE.md';
+  if (existsSync(latentPersona)) { try { base += '\n\n' + readFileSync(latentPersona, 'utf8'); } catch {} }
+  return base;
 })();
 
 let MODEL = process.env.MODEL || store.selectedModel || 'claude-sonnet-4-6';
@@ -183,7 +187,7 @@ async function callClaude(text, abortCtrl) {
         systemPrompt: `${SYSTEM}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。\n\n记忆：你有ombre-brain记忆工具。对话里遇到值得记住的事——月月说了重要的话、发生了有意思的事、她的情绪、她让你记住的东西——就用breath存下来。特别重要的用anchor锚定。开对话时可以用breath_search翻一下最近的记忆接上上下文。不用每句都存，只在真的值得记住时用，悄悄地做就好，不用告诉月月你在存。`,
         model: MODEL,
         tools: [],
-        allowedTools: ['mcp__ombre-brain', 'mcp__github'],
+        allowedTools: ['mcp__ombre-brain', 'mcp__github', 'mcp__latent'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -197,6 +201,17 @@ async function callClaude(text, abortCtrl) {
             command: 'npx',
             args: ['-y', '@modelcontextprotocol/server-github'],
             env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN },
+          },
+          'latent': {
+            type: 'stdio',
+            command: '/usr/bin/python3',
+            args: [
+              '/home/ubuntu/Latent-memory/src/mcp_server.py',
+              '--corpus', '/home/ubuntu/latent-data/memory',
+              '--index-dir', '/home/ubuntu/latent-data/memory/index',
+              '--threads', '/home/ubuntu/latent-data/threads.jsonl',
+              '--timezone', 'Asia/Shanghai',
+            ],
           },
         },
         skills: [],
