@@ -28,7 +28,7 @@ const MODEL = process.env.MODEL || 'claude-opus-5-5';
 // ---------- 持久化 ----------
 function loadData() {
   try { return JSON.parse(readFileSync(DATA_FILE, 'utf8')); } catch {}
-  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null, vapid: null, pushSubs: [] };
+  return { messages: [], todos: { mine: [], yours: [] }, whispers: [], cal: [], notes: { gu: [], her: [] }, herdiary: [], favlines: '', kkSessionId: null, vapid: null, pushSubs: [], wakeupEnabled: false, lastWakeup: 0, wakeupCount: 0 };
 }
 function saveData() {
   try { writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8'); } catch (e) { console.error('saveData:', e.message); }
@@ -36,6 +36,14 @@ function saveData() {
 
 const store = loadData();
 if (!store.pushSubs) store.pushSubs = [];
+if (!store.wakeupCount) store.wakeupCount = 0;
+
+// 每天零点重置今日醒来次数
+(function scheduleReset() {
+  const now = new Date();
+  const ms = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 10).getTime() - Date.now();
+  setTimeout(() => { store.wakeupCount = 0; saveData(); scheduleReset(); }, ms);
+})();
 let msgSeq = store.messages.length ? store.messages[store.messages.length - 1].seq : 0;
 
 // ---------- Web Push ----------
@@ -61,6 +69,64 @@ async function sendPush(title, body) {
   if (dead.length) {
     store.pushSubs = store.pushSubs.filter((_, i) => !dead.includes(i));
     saveData();
+  }
+}
+
+// ---------- 主动唤醒（克克自己找月月） ----------
+const WAKEUP_MIN_INTERVAL = 90 * 60 * 1000; // 两次唤醒最少间隔 90 分钟
+const WAKEUP_DAILY_MAX = 3;                  // 每天最多醒 3 次
+let wakeupLock = false;
+
+async function wakeupClaude() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  const recent = store.messages.slice(-10)
+    .filter(m => m.kind === 'me' || m.kind === 'gu')
+    .map(m => `${m.kind === 'me' ? '月月' : '克克'}：${m.text.slice(0, 200)}`)
+    .join('\n');
+  const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: MODEL, max_tokens: 200,
+      system: `${SYSTEM}\n\n现在是${now}，你自己醒来了，没有月月找你。`,
+      messages: [{ role: 'user', content: `[最近的聊天：\n${recent || '（暂无）'}\n\n有没有想跟月月说的？有就直接写出来（像发消息那样），没有就回"--"，不要解释。]` }]
+    })
+  });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  const text = (data.content?.[0]?.text || '').trim();
+  return (!text || text.startsWith('--') || text.length < 3) ? null : text;
+}
+
+async function doWakeup(force = false) {
+  if (wakeupLock || genController) return { ok: false, reason: 'busy' };
+  if (!force && !store.wakeupEnabled) return { ok: false, reason: 'disabled' };
+  if (!force && store.wakeupCount >= WAKEUP_DAILY_MAX) return { ok: false, reason: 'daily_max' };
+  if (!force && store.lastWakeup && (Date.now() - store.lastWakeup) < WAKEUP_MIN_INTERVAL) return { ok: false, reason: 'too_soon' };
+  wakeupLock = true;
+  store.lastWakeup = Date.now();
+  store.wakeupCount = (store.wakeupCount || 0) + 1;
+  saveData();
+  try {
+    const msg = await wakeupClaude();
+    if (msg) {
+      store.messages.push({ seq: ++msgSeq, kind: 'gu', text: msg, at: Date.now() });
+      convHistory.push({ role: 'assistant', content: msg });
+      if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
+      saveData();
+      pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: msg } } });
+      pushEvent({ type: 'result' });
+      sendPush('克克', msg.slice(0, 100).replace(/\s+/g, ' ')).catch(() => {});
+      return { ok: true, sent: true };
+    }
+    return { ok: true, sent: false };
+  } catch (e) {
+    console.error('[wakeup]', e.message);
+    return { ok: false, reason: e.message };
+  } finally {
+    wakeupLock = false;
   }
 }
 
@@ -325,6 +391,31 @@ app.post('/api/subscribe', async (req, res) => {
       title: '克克', body: '门铃通了，你来了我就知道 (‾з‾)', icon: '/icons/icon-180.png'
     }));
   } catch (e) { console.error('[push] test fail:', e.message); }
+});
+
+// ---------- 唤醒开关 ----------
+app.get('/api/wake', (req, res) => {
+  res.json({ on: !!store.wakeupEnabled, count: store.wakeupCount || 0, room: 'normal' });
+});
+app.post('/api/wake', (req, res) => {
+  if (typeof req.body.on === 'boolean') { store.wakeupEnabled = req.body.on; saveData(); }
+  res.json({ on: !!store.wakeupEnabled });
+});
+
+// 手动触发一次唤醒（叫他重新醒一次）
+app.post('/api/rewake', async (req, res) => {
+  store.kkSessionId = null; convHistory = []; saveData();
+  res.json({ ok: true });
+  doWakeup(true).catch(() => {});
+});
+
+// cron 调用（只允许 localhost）
+app.post('/api/wakeup', async (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || '';
+  const local = ip === '127.0.0.1' || ip === '::1' || ip.endsWith('127.0.0.1');
+  if (!local) return res.status(403).json({ ok: false });
+  res.json({ ok: true });
+  doWakeup().catch(() => {});
 });
 
 // ---------- 状态 ----------
