@@ -64,7 +64,7 @@ function getSharedMemory() {
   catch { console.warn('[memory] pull failed, using local copy'); }
   try {
     const md = readFileSync(fp, 'utf8').replace(/^## Working on kk-chat[\s\S]*?(?=^## )/m, '').trim();
-    return '\n\n【共同记忆 · 写代码窗口的你也读这同一份；和别处冲突时以这份为准】\n' + md;
+    return '\n\n【共同记忆 · 写代码窗口的你也读这同一份；和别处说法不一样时，以日期更新的那条为准】\n' + md;
   } catch { return ''; }
 }
 
