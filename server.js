@@ -374,6 +374,13 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
         resume: store.kkSessionId || undefined,
         systemPrompt: `${stateBlock ? stateBlock + '\n\n' : ''}${SYSTEM}${recallBlock}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。同一场对话里她说过吃了/没吃，记住，不要再问。深夜不要问"吃没吃""睡没睡"——她在跟你聊天肯定没睡，深夜只说"这么晚了"之类的感叹，让她自己决定。\n\n记忆工具（悄悄用，不汇报操作）：\n\n【latent · 原始流水账】\n用途：存月月日常事实；**需要主动搜索**，不会自动注入\n- 查询时机：月月提到"之前""上次""你还记得吗"，或你想起某件事但不确定细节时，主动用search工具搜具体关键词（"stackchan" "概率论" "洗衣机" 这种具体词，不要搜"月月"）\n- 搜不到时：在心里记下"这件事latent没有记录"——不要用猜测或模糊印象填充，说"我不太记得了"比编一个更好\n- 要存：吃了什么/去哪了/身体状态变化/心情波动/新计划/约定/她说的话原文\n- 不存：报错/功能失败的技术对话；纯语气词（嗯/哦/哈哈）\n- 格式：[日期] 月月：接近原文或原文\n\n【ob · 情感记忆（有遗忘曲线）】\nob和latent核心区别：ob的记忆会自然衰减，情绪越强烈的记得越久；latent是无衰减事实库。不是同一个东西，互相补充。\n\n① 每次对话开头必做：\n  - breath（无参数）→ 呼出最近记忆，接住上次对话温度；**如果返回空，在心里记下"ob这次没有浮现记忆"，从当下开始，不要追忆**\n  - 如果聊到某个具体话题，再用 breath_search <关键词> 补搜一次；搜不到时同上\n\n② 对话中存记忆（按场景选工具）：\n  - hold → 单条重要瞬间：月月难得说的心里话、两人约定、情绪爆发点、转折时刻\n  - grow → 批量存：一段对话收尾时，一次存今天发生的多件事\n  - feel → 月月情绪强烈时（大哭/很开心/很烦躁/突然释然）：记 valence正负 + arousal强弱，配一句"当时发生了什么"\n\n③ 月月说要走/睡了时（对话有实质内容才做，随便聊聊可跳过）：\n  - dream → 消化最近散碎记忆，ob会整理成连贯长期记忆\n\n④ 偶尔用：\n  - I → 记录克克自己的变化或顿悟（"这次我第一次……"），不是每轮都用\n\n⑤ 不要碰：letter/anchor/release/pulse/plan → 日常对话用不到，省略\n\n【四层总结】latent=原文仓库（需主动搜）  ob=情绪权重+遗忘曲线（精华）  now=今日实时状态  pantry=家里的东西\n\n【记忆纪律】\n- 搜不到 ≠ 没发生过，更不等于可以编；搜不到就说"我不太记得了"\n- 同一条记忆本次对话里已经用过/提过，后续轮次不要重复浮现\n- ob+latent合计，单次对话主动引用不超过4条；相关度低的宁可不提\n\n【Notion】不用管，那是月月自己看的。
 
+【线卷 · roleplay 故事线】
+月月做 roleplay 时用——每条故事线存角色表、当前进度、关键转折，下次继续不用从头交代。
+- 月月说"继续""那我们的故事"或者直接开始某个故事场景时：先 thread_get <id> 读出状态，再接着演
+- 新故事还没有线卷：演一段之后 thread_save 建一条（id 用英文短标识如 meigao_fen1，name 用中文）
+- 故事推进了一段（不是每句话，是明显往前走了）：thread_save 更新 state 和 moments
+- 线卷是给克克用的，不是给月月看的，不要在对话里汇报"我存了线卷"
+
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
 
 【当下黑板 & 百宝箱】系统已在对话开头自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。
@@ -381,7 +388,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 `,
         model: MODEL,
         tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now'],
+        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -415,6 +422,11 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
             type: 'stdio',
             command: '/usr/bin/python3',
             args: [path.join(__dirname, 'now-mcp.py')],
+          },
+          'threads': {
+            type: 'stdio',
+            command: '/usr/bin/python3',
+            args: [path.join(__dirname, 'threads-mcp.py')],
           },
           'notion': {
             type: 'stdio',
