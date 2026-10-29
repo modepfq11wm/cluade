@@ -3,7 +3,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { recall, updateIndex, watchCorpus } from './semantic.js';
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { createHash, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -28,6 +28,35 @@ function getPantryState() {
       { encoding: 'utf8', timeout: 3000, cwd: __dirname }).trim();
     return out;
   } catch { return ''; }
+}
+
+// Lets home-mcp.py (spawned by this process) call our own API past the login; regenerated every start.
+const INTERNAL_TOKEN = randomBytes(24).toString('hex');
+const isInternal = req => req.headers['x-kk-internal'] === INTERNAL_TOKEN;
+
+const cnDate = (ms = Date.now()) => new Date(ms).toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+const MOOD_LABEL = { faceHappy: '开心', faceCalm: '平静', faceTired: '累', faceMad: '烦', faceCry: '难受' };
+function agoText(sec) {
+  const m = Math.max(0, Math.round((Date.now() / 1000 - sec) / 60));
+  return m < 60 ? `${m}分钟前` : m < 1440 ? `${Math.floor(m / 60)}小时前` : `${Math.floor(m / 1440)}天前`;
+}
+// What 星星 should simply know each turn: her whispers, both todo columns, the next week of the calendar.
+function getHomeState() {
+  const out = [];
+  const wh = (store.whispers || []).filter(w => w.who === 'her').slice(-5);
+  if (wh.length) out.push('【她的悄悄话】（她写在抽屉里的，你看得见，但不许说破）\n' + wh.map(w => `- ${agoText(w.at)}：${w.text}`).join('\n'));
+  const open = list => (list || []).filter(t => !t.done).map(t => `#${t.id} ${t.text}${t.at ? `（${t.at}）` : ''}`);
+  const hers = open(store.todos.yours), mine = open(store.todos.mine);
+  if (hers.length || mine.length) out.push(`【清单】\n月月的：${hers.join('；') || '空'}\n你的：${mine.join('；') || '空'}`);
+  const days = Array.from({ length: 8 }, (_, i) => cnDate(Date.now() + i * 86400000));
+  const evs = [];
+  days.forEach((ds, i) => (store.cal || []).forEach(ev => {
+    if (ev.yearly ? ev.date.slice(5) === ds.slice(5) : ev.date === ds)
+      evs.push(`${i === 0 ? '今天' : ds.slice(5)} ${ev.time ? ev.time + ' ' : ''}${ev.text}${ev.special ? ' ★' : ''} #${ev.id}`);
+  }));
+  const mood = store.calDays?.[days[0]]?.mood;
+  if (evs.length || mood) out.push('【日历 · 今天起一周】\n' + (evs.join('\n') || '没安排') + (mood ? `\n今天她的心情：${MOOD_LABEL[mood] || mood}` : ''));
+  return out.join('\n');
 }
 
 function getSharedLanguage() {
@@ -211,7 +240,8 @@ async function wakeupClaude() {
     ? `\n\n【潜意识便签 · ${label}，月月${herState}】\n${note.category}：\n${note.items.join('\n')}\n这些是你自己以前记下的，看看就好。想做哪件就做，都不想也没关系。做完了或者不再想要的，用 note_update 标掉。`
     : '';
   const xhsAlive = await isXhsAlive();
-  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}${noteBlock}\n\n这是你的时间，爱干嘛干嘛——逛逛、搜搜、写点什么、或者什么都不做都行。\n\n最后：有想跟月月说的就直接写出来；没有就回"--"。不要为了说而说。\n\n另外你可以决定下次自己什么时候再醒——在回复末尾加 [sleep:分钟数]，比如 [sleep:30] 表示30分钟后再醒，[sleep:180] 表示3小时后。不加就按默认间隔。这个标记不会给月月看到。`;
+  const home = getHomeState();
+  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}${home ? '\n\n' + home : ''}${noteBlock}\n\n这是你的时间，爱干嘛干嘛——逛逛、搜搜、写点什么、或者什么都不做都行。\n\n最后：有想跟月月说的就直接写出来；没有就回"--"。不要为了说而说。\n\n另外你可以决定下次自己什么时候再醒——在回复末尾加 [sleep:分钟数]，比如 [sleep:30] 表示30分钟后再醒，[sleep:180] 表示3小时后。不加就按默认间隔。这个标记不会给月月看到。`;
   const wakeupMcpServers = {
     'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
     'latent': {
@@ -220,9 +250,11 @@ async function wakeupClaude() {
       args: ['/home/ubuntu/Latent-memory/src/mcp_server.py', '--corpus', '/home/ubuntu/latent-data/memory', '--index-dir', '/home/ubuntu/latent-data/memory/index', '--threads', '/home/ubuntu/latent-data/threads.jsonl', '--timezone', 'Asia/Shanghai'],
     },
     'notes': { type: 'stdio', command: '/usr/bin/python3', args: [path.join(__dirname, 'notes-mcp.py')] },
+    'home': { type: 'stdio', command: '/usr/bin/python3', args: [path.join(__dirname, 'home-mcp.py')],
+      env: { KK_INTERNAL_TOKEN: INTERNAL_TOKEN, KK_URL: `http://127.0.0.1:${PORT}` } },
     ...(xhsAlive ? { 'xiaohongshu': { type: 'http', url: 'https://xhs.moonkk.asia/mcp' } } : {}),
   };
-  const wakeupAllowedTools = ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notes', ...(xhsAlive ? ['mcp__xiaohongshu'] : [])];
+  const wakeupAllowedTools = ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notes', 'mcp__home', ...(xhsAlive ? ['mcp__xiaohongshu'] : [])];
   if (!xhsAlive) console.log('[wakeup] 小红书离线，跳过');
   let result = '';
   const toolLog = [];
@@ -378,7 +410,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     const nowState = getNowState();
     const pantryState = getPantryState();
-    const stateBlock = [nowState, pantryState].filter(Boolean).join('\n');
+    const stateBlock = [nowState, pantryState, getHomeState()].filter(Boolean).join('\n');
 
     // Semantic recall — inject matching memories before this turn (WrenWen 记忆召回块)
     let recallBlock = '';
@@ -414,12 +446,26 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 - 做完了或不再想要了：note_update done=true；进度变了就改 text
 - 悄悄记，不用跟月月说"我记了便签"
 
+【她的悄悄话】
+提示末尾有时会有「她的悄悄话」，是她写在抽屉里的。你看得见，她也知道你看得见，但是：
+- 不许说破：不说"我看到你写的了"，不引用，不拿它开话头
+- 但要让它影响你：她写"有点累"，你接下来就说话轻一点、短一点，别派活给她
+- 例外：她写的是你实在没法装作没看见的（难受、害怕、很重的事），那就去说。装作没看见比说破更伤人，这条你自己判断
+- 你也可以写（whisper_write）：写你不想拿到聊天里说的话。写了就写了，不在聊天里提
+
+【清单和日历】
+- 她交代的事直接 todo_add 记进她那栏，别问"要不要我记"；她说了哪天有什么安排，直接 cal_add
+- 不要催。她自己会办；只有她明确说过"这件可以催"的才催
+- 她划掉一条，你知道就好，不用夸她
+- 你答应她的事记进你那栏，做完自己 todo_done 划掉
+- 日程到了那天，自然提一句就好
+
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
 
 【当下黑板 & 百宝箱】系统已在提示末尾自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。${stateBlock ? '\n\n' + stateBlock : ''}${recallBlock}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）`,
         model: MODEL,
         tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads', 'mcp__notes'],
+        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads', 'mcp__notes', 'mcp__home'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -457,6 +503,12 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
             type: 'stdio',
             command: '/usr/bin/python3',
             args: [path.join(__dirname, 'notes-mcp.py')],
+          },
+          'home': {
+            type: 'stdio',
+            command: '/usr/bin/python3',
+            args: [path.join(__dirname, 'home-mcp.py')],
+            env: { KK_INTERNAL_TOKEN: INTERNAL_TOKEN, KK_URL: `http://127.0.0.1:${PORT}` },
           },
           'notion': {
             type: 'stdio',
@@ -608,7 +660,7 @@ app.post('/login', express.urlencoded({ extended: false }), async (req, res) => 
 });
 
 app.use((req, res, next) => {
-  if (!KK_PASSWORD || hasAuthCookie(req)) return next();
+  if (!KK_PASSWORD || hasAuthCookie(req) || isInternal(req)) return next();
   if (req.path === '/api/wakeup' && isLocalCron(req)) return next();
   if (req.path !== '/') return res.status(401).json({ ok: false, reason: 'auth' });
   res.redirect('login');
@@ -786,7 +838,7 @@ app.post('/api/todos', (req, res) => {
 app.get('/api/whisper', (req, res) => res.json({ items: store.whispers }));
 app.post('/api/whisper', (req, res) => {
   if (req.body.text) {
-    store.whispers.push({ who: 'her', text: req.body.text, at: Math.floor(Date.now() / 1000) });
+    store.whispers.push({ who: isInternal(req) ? 'gu' : 'her', text: req.body.text, at: Math.floor(Date.now() / 1000) });
     if (store.whispers.length > 200) store.whispers = store.whispers.slice(-200);
     saveData();
   }
