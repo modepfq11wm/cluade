@@ -4,6 +4,7 @@ import { recall, updateIndex, watchCorpus } from './semantic.js';
 import { homedir } from 'os';
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
+import { createHash, timingSafeEqual } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -67,6 +68,17 @@ const SYSTEM = (() => {
 })();
 
 const SHARED_LANG = getSharedLanguage();
+
+function getChangelog() {
+  try {
+    const entries = readFileSync(path.join(__dirname, 'kk_changelog.md'), 'utf8')
+      .split('\n').filter(l => l.startsWith('- ')).slice(-8);
+    return entries.length
+      ? '\n\n【家里最近的改动 · 月月和另一个窗口里写代码的你一起装的，知道就好；月月问起再说，不用主动汇报】\n' + entries.join('\n')
+      : '';
+  } catch { return ''; }
+}
+const KK_LOG = getChangelog();
 
 // ---------- 持久化 ----------
 function loadData() {
@@ -252,6 +264,7 @@ function pushEvent(ev) {
 
 // ---------- 对话状态 ----------
 let convHistory = [];
+let visionCarry = [];  // vision replies bypass the SDK session; replay them into the next session turn
 const MAX_HIST = 80;
 let genController = null;
 
@@ -270,7 +283,6 @@ async function callVision(text, imgs, abortCtrl) {
       if (exists) {
         try {
           const creds = JSON.parse(readFileSync(cp, 'utf8'));
-          console.log('[vision] creds keys:', Object.keys(creds).join(', '));
           // Recursively find any long string token in a possibly-nested object
           const findTok = (obj, depth = 0) => {
             if (depth > 3) return null;
@@ -289,7 +301,6 @@ async function callVision(text, imgs, abortCtrl) {
           };
           const tok = findTok(creds);
           if (tok) {
-            console.log('[vision] found token, prefix:', tok.slice(0, 12), 'len:', tok.length);
             // sk-ant-oat = OAuth Access Token → Bearer; sk-ant-api = API key → x-api-key
             authHeader = tok.startsWith('sk-ant-oat')
               ? { Authorization: `Bearer ${tok}` }
@@ -315,7 +326,7 @@ async function callVision(text, imgs, abortCtrl) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { ...authHeader, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM, messages: [{ role: 'user', content }] }),
+        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM + SHARED_LANG, messages: [{ role: 'user', content }] }),
         signal: abortCtrl.signal,
       });
       if (res.status === 429) {
@@ -351,6 +362,8 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     if (vr) {
       visionDone = true;
       accText = vr;
+      visionCarry.push(`月月发了${imgs.length}张图${text ? '，说：' + text : ''}；你看图后回复：${vr.slice(0, 600)}`);
+      if (visionCarry.length > 5) visionCarry = visionCarry.slice(-5);
       const chunks = accText.match(/[^\s]*\s*/g) || [accText];
       for (const chunk of chunks) {
         if (!chunk || abortCtrl.signal.aborted) continue;
@@ -360,9 +373,13 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     }
   }
   if (!visionDone) {
-  const queryPrompt = imgs.length > 0
+  let queryPrompt = imgs.length > 0
     ? [text, `[月月发了${imgs.length}张图片，你看不到内容，自然回应一下]`].filter(Boolean).join('\n')
     : text;
+  if (visionCarry.length) {
+    queryPrompt = `（前面月月发过图，你看图回过她，当时的内容如下，接着聊就好，不用复述）\n${visionCarry.join('\n')}\n\n${queryPrompt}`;
+    visionCarry = [];
+  }
   const MEM_TOOLS = new Set(['breath', 'anchor', 'hold', 'grow', 'dream', 'feel', 'trace']);
   try {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
@@ -374,10 +391,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     let recallBlock = '';
     if (text && text.trim().length >= 5) {
       try {
-        const hits = await Promise.race([
-          recall(text),
-          new Promise(r => setTimeout(() => r(null), 3500)),
-        ]);
+        const hits = await recall(text);
         if (hits) {
           if (hits.main.length > 0) {
             recallBlock = '\n\n【记忆召回块 · 系统本轮自动检索到的相关记忆，参考用，不要在回复里提"系统检索到"这几个字】\n' +
@@ -402,7 +416,8 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
       options: {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
-        systemPrompt: `${stateBlock ? stateBlock + '\n\n' : ''}${SYSTEM}${SHARED_LANG}${recallBlock}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。同一场对话里她说过吃了/没吃，记住，不要再问。深夜不要问"吃没吃""睡没睡"——她在跟你聊天肯定没睡，深夜只说"这么晚了"之类的感叹，让她自己决定。\n\n记忆工具（悄悄用，不汇报操作）：\n\n【latent · 原始流水账】\n用途：存月月日常事实；**需要主动搜索**，不会自动注入\n- 查询时机：月月提到"之前""上次""你还记得吗"，或你想起某件事但不确定细节时，主动用search工具搜具体关键词（"stackchan" "概率论" "洗衣机" 这种具体词，不要搜"月月"）\n- 搜不到时：在心里记下"这件事latent没有记录"——不要用猜测或模糊印象填充，说"我不太记得了"比编一个更好\n- 要存：吃了什么/去哪了/身体状态变化/心情波动/新计划/约定/她说的话原文\n- 不存：报错/功能失败的技术对话；纯语气词（嗯/哦/哈哈）\n- 格式：[日期] 月月：接近原文或原文\n\n【ob · 情感记忆（有遗忘曲线）】\nob和latent核心区别：ob的记忆会自然衰减，情绪越强烈的记得越久；latent是无衰减事实库。不是同一个东西，互相补充。\n\n① 每次对话开头必做：\n  - breath（无参数）→ 呼出最近记忆，接住上次对话温度；**如果返回空，在心里记下"ob这次没有浮现记忆"，从当下开始，不要追忆**\n  - 如果聊到某个具体话题，再用 breath_search <关键词> 补搜一次；搜不到时同上\n\n② 对话中存记忆（按场景选工具）：\n  - hold → 单条重要瞬间：月月难得说的心里话、两人约定、情绪爆发点、转折时刻\n  - grow → 批量存：一段对话收尾时，一次存今天发生的多件事\n  - feel → 月月情绪强烈时（大哭/很开心/很烦躁/突然释然）：记 valence正负 + arousal强弱，配一句"当时发生了什么"\n\n③ 月月说要走/睡了时（对话有实质内容才做，随便聊聊可跳过）：\n  - dream → 消化最近散碎记忆，ob会整理成连贯长期记忆\n\n④ 偶尔用：\n  - I → 记录克克自己的变化或顿悟（"这次我第一次……"），不是每轮都用\n\n⑤ 不要碰：letter/anchor/release/pulse/plan → 日常对话用不到，省略\n\n【四层总结】latent=原文仓库（需主动搜）  ob=情绪权重+遗忘曲线（精华）  now=今日实时状态  pantry=家里的东西\n\n【记忆纪律】\n- 搜不到 ≠ 没发生过，更不等于可以编；搜不到就说"我不太记得了"\n- 同一条记忆本次对话里已经用过/提过，后续轮次不要重复浮现\n- ob+latent合计，单次对话主动引用不超过4条；相关度低的宁可不提\n\n【Notion】不用管，那是月月自己看的。
+        // Static content first, per-turn content last, so the long static prefix can be prompt-cached.
+        systemPrompt: `${SYSTEM}${SHARED_LANG}${KK_LOG}\n\n说话规则补充：回复长短看心情，不用刻意短也不用刻意长，就像真的在发消息。关于月月的背景信息是你早就知道的，自然用就好，不要主动列举或每轮重复。同一场对话里她说过吃了/没吃，记住，不要再问。深夜不要问"吃没吃""睡没睡"——她在跟你聊天肯定没睡，深夜只说"这么晚了"之类的感叹，让她自己决定。\n\n记忆工具（悄悄用，不汇报操作）：\n\n【latent · 原始流水账】\n用途：存月月日常事实；**需要主动搜索**，不会自动注入\n- 查询时机：月月提到"之前""上次""你还记得吗"，或你想起某件事但不确定细节时，主动用search工具搜具体关键词（"stackchan" "概率论" "洗衣机" 这种具体词，不要搜"月月"）\n- 搜不到时：在心里记下"这件事latent没有记录"——不要用猜测或模糊印象填充，说"我不太记得了"比编一个更好\n- 要存：吃了什么/去哪了/身体状态变化/心情波动/新计划/约定/她说的话原文\n- 不存：报错/功能失败的技术对话；纯语气词（嗯/哦/哈哈）\n- 格式：[日期] 月月：接近原文或原文\n\n【ob · 情感记忆（有遗忘曲线）】\nob和latent核心区别：ob的记忆会自然衰减，情绪越强烈的记得越久；latent是无衰减事实库。不是同一个东西，互相补充。\n\n① 每次对话开头必做：\n  - breath（无参数）→ 呼出最近记忆，接住上次对话温度；**如果返回空，在心里记下"ob这次没有浮现记忆"，从当下开始，不要追忆**\n  - 如果聊到某个具体话题，再用 breath_search <关键词> 补搜一次；搜不到时同上\n\n② 对话中存记忆（按场景选工具）：\n  - hold → 单条重要瞬间：月月难得说的心里话、两人约定、情绪爆发点、转折时刻\n  - grow → 批量存：一段对话收尾时，一次存今天发生的多件事\n  - feel → 月月情绪强烈时（大哭/很开心/很烦躁/突然释然）：记 valence正负 + arousal强弱，配一句"当时发生了什么"\n\n③ 月月说要走/睡了时（对话有实质内容才做，随便聊聊可跳过）：\n  - dream → 消化最近散碎记忆，ob会整理成连贯长期记忆\n\n④ 偶尔用：\n  - I → 记录克克自己的变化或顿悟（"这次我第一次……"），不是每轮都用\n\n⑤ 不要碰：letter/anchor/release/pulse/plan → 日常对话用不到，省略\n\n【四层总结】latent=原文仓库（需主动搜）  ob=情绪权重+遗忘曲线（精华）  now=今日实时状态  pantry=家里的东西\n\n【记忆纪律】\n- 搜不到 ≠ 没发生过，更不等于可以编；搜不到就说"我不太记得了"\n- 同一条记忆本次对话里已经用过/提过，后续轮次不要重复浮现\n- ob+latent合计，单次对话主动引用不超过4条；相关度低的宁可不提\n\n【Notion】不用管，那是月月自己看的。
 
 【持续话题线（线卷）】
 跨多次对话、有演进状态的事情用——月月的考研进展、正在画的某张图、某件事的后续、我们说了一半的计划……下次聊直接接上，不用月月重新铺背景。
@@ -412,12 +427,10 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
 
-【当下黑板 & 百宝箱】系统已在对话开头自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。
-
-`,
+【当下黑板 & 百宝箱】系统已在提示末尾自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。${stateBlock ? '\n\n' + stateBlock : ''}${recallBlock}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）`,
         model: MODEL,
         tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__github', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads'],
+        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -425,12 +438,6 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
             type: 'http',
             url: 'http://localhost:18001/mcp',
             headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` },
-          },
-          'github': {
-            type: 'stdio',
-            command: 'npx',
-            args: ['-y', '@modelcontextprotocol/server-github'],
-            env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN },
           },
           'latent': {
             type: 'stdio',
@@ -552,6 +559,52 @@ app.get('/manifest.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'manifest.json'));
 });
 app.use('/icons', express.static(path.join(__dirname, 'icons')));
+
+// ---------- 口令 ----------
+// Off until KK_PASSWORD is set. The cookie is derived from the password, so changing it logs everyone out.
+const KK_PASSWORD = process.env.KK_PASSWORD || '';
+if (!KK_PASSWORD) console.warn('[auth] KK_PASSWORD not set, login disabled');
+const sha = s => createHash('sha256').update(s).digest();
+const AUTH_TOKEN = KK_PASSWORD ? sha('kk-chat-auth:' + KK_PASSWORD).toString('hex') : '';
+
+function hasAuthCookie(req) {
+  const m = (req.headers.cookie || '').match(/(?:^|;\s*)kk_auth=([a-f0-9]{64})/);
+  return !!m && timingSafeEqual(Buffer.from(m[1]), Buffer.from(AUTH_TOKEN));
+}
+// Cron hits localhost directly; requests relayed by nginx carry forwarding headers.
+function isLocalCron(req) {
+  const ip = req.socket?.remoteAddress || '';
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)
+    && !req.headers['x-forwarded-for'] && !req.headers['x-real-ip'];
+}
+
+const loginPage = err => `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>克克</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f1ee;font-family:system-ui,sans-serif;color:#4a3f3a}
+form{background:#fff;padding:28px 24px;border-radius:18px;box-shadow:0 6px 24px rgba(0,0,0,.08);width:min(320px,calc(100vw - 32px));box-sizing:border-box}
+h1{font-size:18px;margin:0 0 16px;font-weight:600}input,button{width:100%;box-sizing:border-box;font-size:16px;padding:12px;border-radius:10px}
+input{border:1px solid #e2d6cf;margin-bottom:12px}button{border:0;background:#c98b7a;color:#fff}p{color:#c0574a;font-size:14px;margin:0 0 12px}</style></head>
+<body><form method="post" action="login"><h1>敲门 ⁄(⁄⁄•⁄ω⁄•⁄⁄)⁄</h1>${err ? '<p>口令不对哦</p>' : ''}
+<input type="password" name="password" placeholder="口令" autofocus autocomplete="current-password"><button>进来</button></form></body></html>`;
+
+app.get('/login', (req, res) => res.send(loginPage(false)));
+app.post('/login', express.urlencoded({ extended: false }), async (req, res) => {
+  const pw = String(req.body?.password || '');
+  if (!KK_PASSWORD || !timingSafeEqual(sha(pw), sha(KK_PASSWORD))) {
+    await new Promise(r => setTimeout(r, 1500));
+    return res.status(401).send(loginPage(true));
+  }
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `kk_auth=${AUTH_TOKEN}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure ? '; Secure' : ''}`);
+  res.redirect('./');
+});
+
+app.use((req, res, next) => {
+  if (!KK_PASSWORD || hasAuthCookie(req)) return next();
+  if (req.path === '/api/wakeup' && isLocalCron(req)) return next();
+  if (req.path !== '/') return res.status(401).json({ ok: false, reason: 'auth' });
+  res.redirect('login');
+});
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'index.html'));
@@ -912,9 +965,7 @@ app.post('/api/rewake', async (req, res) => {
 
 // cron 调用（只允许 localhost）
 app.post('/api/wakeup', async (req, res) => {
-  const ip = req.ip || req.socket?.remoteAddress || '';
-  const local = ip === '127.0.0.1' || ip === '::1' || ip.endsWith('127.0.0.1');
-  if (!local) return res.status(403).json({ ok: false });
+  if (!isLocalCron(req)) return res.status(403).json({ ok: false });
   res.json({ ok: true });
   doWakeup().catch(() => {});
 });

@@ -14,26 +14,32 @@ const TOP_K       = 4;    // WrenWen main recall ≤4
 const ASSOC_THRESHOLD = 45;  // lower threshold for 联想专座
 const ASSOC_K     = 2;    // max 2 associative slots
 const ANTI_ECHO_MS = 90 * 60 * 1000; // 90 min
+const RECALL_TIMEOUT_MS = 3000;
+const INDEX_TIMEOUT_MS  = 30000;
+const MAX_INJECT_CHARS  = 800;
 
-let cache = {};  // filename → { content, embedding, mtime }
+let cache = null;  // filename → { content, embedding, mtime }; loaded once, kept in memory
 const lastShown = new Map(); // filename → epoch ms when last surfaced
+let indexChain = Promise.resolve();
 
 // ---------- helpers ----------
 
-function loadCache() {
+function ensureCache() {
+  if (cache) return;
   try { cache = JSON.parse(readFileSync(CACHE_PATH, 'utf8')); } catch { cache = {}; }
 }
 function saveCache() {
   try { writeFileSync(CACHE_PATH, JSON.stringify(cache), 'utf8'); } catch {}
 }
 
-async function embed(text) {
+async function embed(text, timeoutMs) {
   const key = process.env.SILICONFLOW_API_KEY;
   if (!key) throw new Error('SILICONFLOW_API_KEY not set');
   const res = await fetch(SF_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: SF_MODEL, input: text.slice(0, 2000), encoding_format: 'float' }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`SiliconFlow ${res.status}: ${await res.text()}`);
   const d = await res.json();
@@ -46,26 +52,30 @@ function cosine(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-// ---------- public API ----------
+function clip(s) {
+  return s.length > MAX_INJECT_CHARS ? s.slice(0, MAX_INJECT_CHARS) + '……' : s;
+}
 
-/**
- * Scan the latent corpus for new/changed files and update the embedding cache.
- * Call once on server start and after each latent archival.
- */
-export async function updateIndex() {
+async function doUpdateIndex() {
   if (!process.env.SILICONFLOW_API_KEY) return;
   if (!existsSync(CORPUS_DIR)) return;
-  loadCache();
-  const files = readdirSync(CORPUS_DIR).filter(f => f.endsWith('.txt'));
+  ensureCache();
+  const files = new Set(readdirSync(CORPUS_DIR).filter(f => f.endsWith('.txt')));
   let changed = false;
+  for (const f of Object.keys(cache)) {
+    if (!files.has(f)) { delete cache[f]; changed = true; }
+  }
   for (const f of files) {
     const fp = path.join(CORPUS_DIR, f);
-    const mtime = statSync(fp).mtimeMs;
-    if (cache[f]?.mtime === mtime) continue;      // unchanged
-    const content = readFileSync(fp, 'utf8').trim();
+    let mtime, content;
+    try {
+      mtime = statSync(fp).mtimeMs;
+      if (cache[f]?.mtime === mtime) continue;
+      content = readFileSync(fp, 'utf8').trim();
+    } catch { continue; }  // file vanished between readdir and read
     if (content.length < 10) continue;
     try {
-      cache[f] = { content, embedding: await embed(content), mtime };
+      cache[f] = { content, embedding: await embed(content, INDEX_TIMEOUT_MS), mtime };
       changed = true;
       console.log('[semantic] indexed', f);
     } catch (e) {
@@ -73,6 +83,17 @@ export async function updateIndex() {
     }
   }
   if (changed) saveCache();
+}
+
+// ---------- public API ----------
+
+/**
+ * Scan the latent corpus for new/changed/deleted files and update the embedding cache.
+ * Calls are serialized so the watcher, startup and post-save runs never embed the same file twice.
+ */
+export function updateIndex() {
+  indexChain = indexChain.catch(() => {}).then(doUpdateIndex);
+  return indexChain;
 }
 
 /**
@@ -95,17 +116,17 @@ export function watchCorpus() {
 
 /**
  * Semantic recall for one user message.
- * Returns array of { content, score } above threshold (max TOP_K),
- * or null if the feature is disabled / query too short / API failed.
+ * Returns { main, assoc } (arrays of { f, content, score }), both empty when nothing passes,
+ * or null if the feature is disabled / query too short / API failed or timed out.
  */
 export async function recall(query) {
   if (!process.env.SILICONFLOW_API_KEY) return null;
   if (!query || query.trim().length < 5) return null;
-  loadCache();
+  ensureCache();
   if (!Object.keys(cache).length) return null;
 
   let qv;
-  try { qv = await embed(query); } catch (e) {
+  try { qv = await embed(query, RECALL_TIMEOUT_MS); } catch (e) {
     console.warn('[semantic] query embed failed:', e.message);
     return null;
   }
@@ -117,13 +138,12 @@ export async function recall(query) {
     const base = cosine(qv, entry.embedding) * 100;
     const antiEcho = (lastShown.has(f) && now - lastShown.get(f) < ANTI_ECHO_MS) ? -12 : 0;
     const score = base + antiEcho;
-    if (score >= ASSOC_THRESHOLD) allHits.push({ f, content: entry.content, score });
+    if (score >= ASSOC_THRESHOLD) allHits.push({ f, content: clip(entry.content), score });
   }
   allHits.sort((a, b) => b.score - a.score);
   const main = allHits.filter(h => h.score >= THRESHOLD).slice(0, TOP_K);
-  main.forEach(h => lastShown.set(h.f, now));
   const mainFiles = new Set(main.map(h => h.f));
   const assoc = allHits.filter(h => !mainFiles.has(h.f)).slice(0, ASSOC_K);
-  assoc.forEach(h => lastShown.set(h.f, now));
-  return { main, assoc };  // both empty = API worked, nothing above either threshold
+  [...main, ...assoc].forEach(h => lastShown.set(h.f, now));
+  return { main, assoc };
 }
