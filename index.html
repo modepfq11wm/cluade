@@ -2463,7 +2463,30 @@ function appendFileCard(el, raw) {
   el.appendChild(a);
 }
 
+// [voice:xxx.mp3] — the server appends this when 星星 speaks a line out loud
+const VOICE_RE = /\[voice:([\w-]+\.mp3)\]/g;
+function appendVoice(el, f) {
+  const a = document.createElement('audio');
+  a.controls = true;
+  a.preload = 'none';
+  a.src = 'api/voice?f=' + encodeURIComponent(f);
+  a.style.cssText = 'display:block;width:100%;max-width:260px;height:36px;margin:6px 0';
+  el.appendChild(a);
+}
+
 function appendWithImages(el, text, streaming) {
+  VOICE_RE.lastIndex = 0;
+  if (VOICE_RE.test(text)) {
+    const re = new RegExp(VOICE_RE.source, 'g');
+    let cur = 0, vm;
+    while ((vm = re.exec(text))) {
+      if (vm.index > cur) appendWithImages(el, text.slice(cur, vm.index), streaming);
+      appendVoice(el, vm[1]);
+      cur = vm.index + vm[0].length;
+    }
+    if (cur < text.length) appendWithImages(el, text.slice(cur), streaming);
+    return;
+  }
   SONG_RE.lastIndex = 0;
   if (SONG_RE.test(text)) {
     const re = new RegExp(SONG_RE.source, 'g');
@@ -2597,7 +2620,9 @@ function renderPlainInto(host, text, whole) {
   const hasFile = FILE_RE.test(text);
   SONG_RE.lastIndex = 0;
   const hasSong = SONG_RE.test(text);
-  if (!hasImg && !hasH && !hasInline && !hasFile && !hasSong) {
+  VOICE_RE.lastIndex = 0;
+  const hasVoice = VOICE_RE.test(text);
+  if (!hasImg && !hasH && !hasInline && !hasFile && !hasSong && !hasVoice) {
     if (!whole) { el.append(text); host.appendChild(el); }
     return;
   }

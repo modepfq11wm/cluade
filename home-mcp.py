@@ -10,10 +10,10 @@ BASE = os.environ.get('KK_URL', 'http://127.0.0.1:3000')
 TOKEN = os.environ.get('KK_INTERNAL_TOKEN', '')
 MOODS = {'faceHappy': '开心', 'faceCalm': '平静', 'faceTired': '累', 'faceMad': '烦', 'faceCry': '难受'}
 
-def post(path, body):
+def post(path, body, timeout=10):
     req = urllib.request.Request(BASE + path, data=json.dumps(body, ensure_ascii=False).encode('utf-8'),
                                  headers={'Content-Type': 'application/json', 'x-kk-internal': TOKEN}, method='POST')
-    with urllib.request.urlopen(req, timeout=10) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode('utf-8') or '{}')
 
 SIDE = {'hers': 'yours', 'mine': 'mine'}
@@ -41,6 +41,11 @@ TOOLS = [
          "date": {"type": "string", "description": "YYYY-MM-DD"},
          "mood": {"type": "string", "enum": list(MOODS), "description": "faceHappy开心 faceCalm平静 faceTired累 faceMad烦 faceCry难受"}},
          "required": ["date", "mood"]}},
+    {"name": "voice_say", "description": "把一句话真的说出来，挂在这条回复下面给她听。稀有地用：打字太轻的话、她想听你声音、特别的日子。一天最多一两条。",
+     "inputSchema": {"type": "object", "properties": {
+         "text": {"type": "string", "description": "要念的那句，短一点，用逗号句号断好停顿，不带颜文字"},
+         "preset": {"type": "string", "enum": ["平常", "亲密", "念稿"], "description": "平常=日常语气；亲密=起伏大、慢，说情话用；念稿=平稳清楚"}},
+         "required": ["text"]}},
     {"name": "whisper_write", "description": "在悄悄话抽屉里写一句你不想拿到聊天里说的话。写了就写了，别在聊天里提。",
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
 ]
@@ -62,6 +67,9 @@ def call_tool(name, a):
     if name == 'cal_mood':
         post('/api/cal', {'action': 'set_mood', 'date': a['date'], 'mood': a['mood']})
         return f"记下了：{a['date']} {MOODS.get(a['mood'], a['mood'])}"
+    if name == 'voice_say':
+        r = post('/api/voice/say', {'text': a['text'], 'preset': a.get('preset', '平常')}, timeout=75)
+        return '说出来了，会挂在你这条回复下面' if r.get('ok') else f"没说出来：{r.get('error', '不知道为什么')}"
     if name == 'whisper_write':
         post('/api/whisper', {'text': a['text']})
         return '写好了'

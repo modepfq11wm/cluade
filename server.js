@@ -287,7 +287,11 @@ async function wakeupClaude() {
   const sleepMatch = result.match(/\[sleep:(\d+)\]/);
   const nextSleep = sleepMatch ? Math.max(30, Math.min(parseInt(sleepMatch[1]), 480)) : null;
   const cleaned = tightenParas(result.replace(/\[sleep:\d+\]/g, '').trim());
-  const text = (!cleaned || cleaned.startsWith('--') || cleaned.length < 3) ? null : cleaned;
+  let text = (!cleaned || cleaned.startsWith('--') || cleaned.length < 3) ? null : cleaned;
+  if (pendingVoices.length) {
+    text = [text, ...pendingVoices.map(f => `[voice:${f}]`)].filter(Boolean).join('\n');
+    pendingVoices = [];
+  }
   return { text, tools: toolLog, nextSleep, note: note?.category || null };
 }
 
@@ -370,6 +374,45 @@ function saveUploads(imgs) {
     } catch (e) { console.error('[upload]', e.message); }
   });
   return out;
+}
+
+// ---------- 语音 ----------
+const VOICE_DIR = path.join(__dirname, 'voice');
+const VOICE_PRESETS = {
+  平常: { stability: 0.5, similarity_boost: 0.75, style: 0.2 },
+  亲密: { stability: 0.35, similarity_boost: 0.75, style: 0.5 },
+  念稿: { stability: 0.75, similarity_boost: 0.75, style: 0 },
+};
+const VOICE_DAILY_MAX = 3;
+let pendingVoices = [];  // made during the current turn; appended to that reply as [voice:file]
+// TTS reads punctuation, not meaning: drop emoji and kaomoji, turn ellipses into pauses.
+const ttsText = s => String(s || '')
+  .replace(/\p{Extended_Pictographic}/gu, '')
+  .replace(/[(（][^()（）\p{Script=Han}]{1,20}[)）]/gu, '')
+  .replace(/(…|\.{3,})+/g, '，')
+  .replace(/[～~]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim().slice(0, 500);
+async function synthVoice(text, preset) {
+  const t = ttsText(text);
+  if (!t) throw new Error('没有能念的字');
+  const today = cnDate();
+  if (store.voiceDay?.date !== today) store.voiceDay = { date: today, count: 0 };
+  if (store.voiceDay.count >= VOICE_DAILY_MAX) throw new Error(`今天已经说过 ${VOICE_DAILY_MAX} 条了，留到明天`);
+  const voiceId = process.env.ELEVENLABS_VOICE_ID || 'qatS19Ljw9eAB7DnNUxz';
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+    method: 'POST',
+    headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY || '', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: t, model_id: process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2', voice_settings: VOICE_PRESETS[preset] || VOICE_PRESETS['平常'] }),
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!r.ok) throw new Error(`ElevenLabs ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  mkdirSync(VOICE_DIR, { recursive: true });
+  const f = `${today}-${Date.now()}.mp3`;
+  writeFileSync(path.join(VOICE_DIR, f), Buffer.from(await r.arrayBuffer()));
+  store.voiceDay.count++;
+  saveData();
+  return f;
 }
 
 let convHistory = [];
@@ -459,6 +502,13 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 - 她划掉一条，你知道就好，不用夸她
 - 你答应她的事记进你那栏，做完自己 todo_done 划掉
 - 日程到了那天，自然提一句就好
+
+【语音】
+voice_say 能把一句话真的说出来，挂在你这条回复下面给她听。那是你自己挑的声音。语音是稀有的，一天来一条，那条会被听好几遍；一天来十条，第三条就没人点了：
+- 用：有些话打字太轻，必须让她听见语气；她说想听你的声音；特别的日子
+- 不用：日常聊天；有信息量的话（她要能复制、能搜）；今天已经说过一条了
+- 念的那句单独写，短一点，用逗号句号断好停顿，不带颜文字；preset 挑「平常」「亲密」「念稿」
+- 文字回复照常说，不用说"我给你发了语音"
 
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
 
@@ -579,6 +629,13 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     }
   }
 
+  if (pendingVoices.length) {
+    const add = (accText ? '\n' : '') + pendingVoices.map(f => `[voice:${f}]`).join('\n');
+    pendingVoices = [];
+    accText += add;
+    pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: add } } });
+  }
+
   if (memStored) {
     pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: ' ⭐' } } });
     accText += ' ⭐';
@@ -666,6 +723,22 @@ app.use((req, res, next) => {
   res.redirect('login');
 });
 app.use('/uploads', express.static(UPLOAD_DIR));
+app.post('/api/voice/say', async (req, res) => {
+  if (!isInternal(req)) return res.status(403).json({ ok: false });
+  try {
+    const f = await synthVoice(req.body?.text, req.body?.preset);
+    pendingVoices.push(f);
+    res.json({ ok: true, f });
+  } catch (e) {
+    console.error('[voice]', e.message);
+    res.json({ ok: false, error: e.message });
+  }
+});
+app.get('/api/voice', (req, res) => {
+  const f = String(req.query.f || '');
+  if (!/^[\w-]+\.mp3$/.test(f) || !existsSync(path.join(VOICE_DIR, f))) return res.status(404).end();
+  res.sendFile(path.join(VOICE_DIR, f));
+});
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'index.html'));
