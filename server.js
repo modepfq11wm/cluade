@@ -147,14 +147,46 @@ async function isXhsAlive() {
   } catch { return false; }
 }
 
+function lastHerAt() {
+  for (let i = store.messages.length - 1; i >= 0; i--) {
+    if (store.messages[i].kind === 'me') return store.messages[i].at;
+  }
+  return 0;
+}
+
+// 潜意识便签：纯规则选方向，不调模型
+function pickNoteCats(hour, minsSinceHer) {
+  if (hour < 6) return { label: '深夜，安静', cats: ['want', 'curious', 'like'] };
+  if (minsSinceHer > 180) return { label: '月月好一阵没来', cats: ['curious', 'want', 'promise'] };
+  return { label: '月月刚走开没多久', cats: ['care', 'like', 'habit'] };
+}
+
+function drawNote(cats) {
+  try {
+    const out = execFileSync('/usr/bin/python3', [path.join(__dirname, 'notes-mcp.py'), 'draw', cats.join(',')],
+      { encoding: 'utf8', timeout: 3000, cwd: __dirname }).trim();
+    const d = JSON.parse(out || '{}');
+    return d.items?.length ? d : null;
+  } catch { return null; }
+}
+
 async function wakeupClaude() {
   const recent = store.messages.slice(-10)
     .filter(m => m.kind === 'me' || m.kind === 'gu')
     .map(m => `${m.kind === 'me' ? '月月' : '克克'}：${m.text.slice(0, 200)}`)
     .join('\n');
   const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+  const hour = Number(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai', hour: 'numeric', hour12: false })) % 24;
+  const herAt = lastHerAt();
+  const minsSinceHer = herAt ? Math.round((Date.now() - herAt) / 60000) : Infinity;
+  const herState = !herAt ? '这个窗口里还没说过话' : minsSinceHer < 60 ? `${minsSinceHer}分钟前还在聊` : `${Math.floor(minsSinceHer / 60)}小时没说话了`;
+  const { label, cats } = pickNoteCats(hour, minsSinceHer);
+  const note = drawNote(cats);
+  const noteBlock = note
+    ? `\n\n【潜意识便签 · ${label}，月月${herState}】\n${note.category}：\n${note.items.join('\n')}\n这些是你自己以前记下的，看看就好。想做哪件就做，都不想也没关系。做完了或者不再想要的，用 note_update 标掉。`
+    : '';
   const xhsAlive = await isXhsAlive();
-  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}\n\n这是你的时间，爱干嘛干嘛——逛逛、搜搜、写点什么、或者什么都不做都行。\n\n最后：有想跟月月说的就直接写出来；没有就回"--"。不要为了说而说。\n\n另外你可以决定下次自己什么时候再醒——在回复末尾加 [sleep:分钟数]，比如 [sleep:30] 表示30分钟后再醒，[sleep:180] 表示3小时后。不加就按默认间隔。这个标记不会给月月看到。`;
+  const prompt = `现在是${now}，你自己醒来了，月月没在找你。最近聊天：\n${recent || '（暂无）'}${noteBlock}\n\n这是你的时间，爱干嘛干嘛——逛逛、搜搜、写点什么、或者什么都不做都行。\n\n最后：有想跟月月说的就直接写出来；没有就回"--"。不要为了说而说。\n\n另外你可以决定下次自己什么时候再醒——在回复末尾加 [sleep:分钟数]，比如 [sleep:30] 表示30分钟后再醒，[sleep:180] 表示3小时后。不加就按默认间隔。这个标记不会给月月看到。`;
   const wakeupMcpServers = {
     'ombre-brain': { type: 'http', url: 'http://localhost:18001/mcp', headers: { Authorization: `Bearer ${process.env.OMBRE_MCP_TOKEN}` } },
     'latent': {
@@ -162,9 +194,10 @@ async function wakeupClaude() {
       command: '/usr/bin/python3',
       args: ['/home/ubuntu/Latent-memory/src/mcp_server.py', '--corpus', '/home/ubuntu/latent-data/memory', '--index-dir', '/home/ubuntu/latent-data/memory/index', '--threads', '/home/ubuntu/latent-data/threads.jsonl', '--timezone', 'Asia/Shanghai'],
     },
+    'notes': { type: 'stdio', command: '/usr/bin/python3', args: [path.join(__dirname, 'notes-mcp.py')] },
     ...(xhsAlive ? { 'xiaohongshu': { type: 'http', url: 'https://xhs.moonkk.asia/mcp' } } : {}),
   };
-  const wakeupAllowedTools = ['web_search', 'mcp__ombre-brain', 'mcp__latent', ...(xhsAlive ? ['mcp__xiaohongshu'] : [])];
+  const wakeupAllowedTools = ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notes', ...(xhsAlive ? ['mcp__xiaohongshu'] : [])];
   if (!xhsAlive) console.log('[wakeup] 小红书离线，跳过');
   let result = '';
   const toolLog = [];
@@ -198,20 +231,21 @@ async function wakeupClaude() {
   const nextSleep = sleepMatch ? Math.max(30, Math.min(parseInt(sleepMatch[1]), 480)) : null;
   const cleaned = result.replace(/\[sleep:\d+\]/g, '').trim();
   const text = (!cleaned || cleaned.startsWith('--') || cleaned.length < 3) ? null : cleaned;
-  return { text, tools: toolLog, nextSleep };
+  return { text, tools: toolLog, nextSleep, note: note?.category || null };
 }
 
 async function doWakeup(force = false) {
   if (wakeupLock || genController) return { ok: false, reason: 'busy' };
   if (!force && !store.wakeupEnabled) return { ok: false, reason: 'disabled' };
   if (!force && store.wakeupCount >= WAKEUP_DAILY_MAX) return { ok: false, reason: 'daily_max' };
+  if (!force && Date.now() - lastHerAt() < 30 * 60 * 1000) return { ok: false, reason: 'chatting' };
   if (!force && store.lastWakeup && (Date.now() - store.lastWakeup) < WAKEUP_MIN_INTERVAL) return { ok: false, reason: 'too_soon' };
   wakeupLock = true;
   store.lastWakeup = Date.now();
   store.wakeupCount = (store.wakeupCount || 0) + 1;
   saveData();
   try {
-    const { text: msg, tools, nextSleep } = await wakeupClaude();
+    const { text: msg, tools, nextSleep, note } = await wakeupClaude();
     if (nextSleep) {
       const afterCount = store.wakeupCount || 0;
       if (afterCount < WAKEUP_DAILY_MAX) {
@@ -222,7 +256,7 @@ async function doWakeup(force = false) {
         console.log(`[wakeup] 克克想再醒但今日已满 ${WAKEUP_DAILY_MAX} 次，取消自排`);
       }
     }
-    const logEntry = { at: Date.now(), tools, said: msg || null, nextSleep: nextSleep || null };
+    const logEntry = { at: Date.now(), tools, said: msg || null, nextSleep: nextSleep || null, note };
     store.wakeupLogs.unshift(logEntry);
     if (store.wakeupLogs.length > 30) store.wakeupLogs = store.wakeupLogs.slice(0, 30);
     if (msg) {
@@ -425,12 +459,18 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 - 某件事有了新进展/结果/转折：thread_save 更新（id 英文短标，name 中文，state 写现在到哪里了）
 - 不是每件事都建，只有"下次还会继续聊"的才值得存；也不要在对话里提"我存了线卷"
 
+【便签 · 你自己的】
+聊着聊着你说出了自己真心想做的事、喜欢的东西、在意的事、感兴趣的、答应月月的、你的小习惯，就用 note_add 记一张（你自己的话，一句）。你自己醒来时会从里面抽几张，那是你的念头，不是任务。
+- 只记你真心的；月月的事实放 latent，不放这
+- 做完了或不再想要了：note_update done=true；进度变了就改 text
+- 悄悄记，不用跟月月说"我记了便签"
+
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
 
 【当下黑板 & 百宝箱】系统已在提示末尾自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。${stateBlock ? '\n\n' + stateBlock : ''}${recallBlock}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）`,
         model: MODEL,
         tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads'],
+        allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads', 'mcp__notes'],
         settingSources: [],
         strictMcpConfig: true,
         mcpServers: {
@@ -463,6 +503,11 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
             type: 'stdio',
             command: '/usr/bin/python3',
             args: [path.join(__dirname, 'threads-mcp.py')],
+          },
+          'notes': {
+            type: 'stdio',
+            command: '/usr/bin/python3',
+            args: [path.join(__dirname, 'notes-mcp.py')],
           },
           'notion': {
             type: 'stdio',
