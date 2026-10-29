@@ -11,6 +11,8 @@ const CACHE_PATH  = '/home/ubuntu/latent-data/.embed_cache.json';
 
 const THRESHOLD   = 60;   // cosine×100; tune after seeing real data
 const TOP_K       = 4;    // WrenWen main recall ≤4
+const ASSOC_THRESHOLD = 45;  // lower threshold for 联想专座
+const ASSOC_K     = 2;    // max 2 associative slots
 const ANTI_ECHO_MS = 90 * 60 * 1000; // 90 min
 
 let cache = {};  // filename → { content, embedding, mtime }
@@ -109,16 +111,19 @@ export async function recall(query) {
   }
 
   const now = Date.now();
-  const hits = [];
+  const allHits = [];
   for (const [f, entry] of Object.entries(cache)) {
     if (!entry.embedding) continue;
     const base = cosine(qv, entry.embedding) * 100;
     const antiEcho = (lastShown.has(f) && now - lastShown.get(f) < ANTI_ECHO_MS) ? -12 : 0;
     const score = base + antiEcho;
-    if (score >= THRESHOLD) hits.push({ f, content: entry.content, score });
+    if (score >= ASSOC_THRESHOLD) allHits.push({ f, content: entry.content, score });
   }
-  hits.sort((a, b) => b.score - a.score);
-  const top = hits.slice(0, TOP_K);
-  top.forEach(h => lastShown.set(h.f, now));
-  return top;  // empty array = API worked, nothing above threshold
+  allHits.sort((a, b) => b.score - a.score);
+  const main = allHits.filter(h => h.score >= THRESHOLD).slice(0, TOP_K);
+  main.forEach(h => lastShown.set(h.f, now));
+  const mainFiles = new Set(main.map(h => h.f));
+  const assoc = allHits.filter(h => !mainFiles.has(h.f)).slice(0, ASSOC_K);
+  assoc.forEach(h => lastShown.set(h.f, now));
+  return { main, assoc };  // both empty = API worked, nothing above either threshold
 }
