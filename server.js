@@ -289,7 +289,7 @@ async function wakeupClaude() {
   const cleaned = tightenParas(result.replace(/\[sleep:\d+\]/g, '').trim());
   let text = (!cleaned || cleaned.startsWith('--') || cleaned.length < 3) ? null : cleaned;
   if (pendingVoices.length) {
-    text = [text, ...pendingVoices.map(f => `[voice:${f}]`)].filter(Boolean).join('\n');
+    text = [text, ...pendingVoices.map(voiceMark)].filter(Boolean).join('\n');
     pendingVoices = [];
   }
   return { text, tools: toolLog, nextSleep, note: note?.category || null };
@@ -409,11 +409,13 @@ async function synthVoice(text, preset) {
   if (!r.ok) throw new Error(`ElevenLabs ${r.status}: ${(await r.text()).slice(0, 200)}`);
   mkdirSync(VOICE_DIR, { recursive: true });
   const f = `${today}-${Date.now()}.mp3`;
-  writeFileSync(path.join(VOICE_DIR, f), Buffer.from(await r.arrayBuffer()));
+  const buf = Buffer.from(await r.arrayBuffer());
+  writeFileSync(path.join(VOICE_DIR, f), buf);
   store.voiceDay.count++;
   saveData();
-  return f;
+  return { f, secs: Math.max(1, Math.round(buf.length * 8 / 128000)) };  // mp3 at a constant 128 kbps
 }
+const voiceMark = v => `[voice:${v.f}:${v.secs}]`;
 
 let convHistory = [];
 const MAX_HIST = 80;
@@ -630,7 +632,7 @@ voice_say 能把一句话真的说出来，挂在你这条回复下面给她听�
   }
 
   if (pendingVoices.length) {
-    const add = (accText ? '\n' : '') + pendingVoices.map(f => `[voice:${f}]`).join('\n');
+    const add = (accText ? '\n' : '') + pendingVoices.map(voiceMark).join('\n');
     pendingVoices = [];
     accText += add;
     pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: add } } });
@@ -726,9 +728,9 @@ app.use('/uploads', express.static(UPLOAD_DIR));
 app.post('/api/voice/say', async (req, res) => {
   if (!isInternal(req)) return res.status(403).json({ ok: false });
   try {
-    const f = await synthVoice(req.body?.text, req.body?.preset);
-    pendingVoices.push(f);
-    res.json({ ok: true, f });
+    const v = await synthVoice(req.body?.text, req.body?.preset);
+    pendingVoices.push(v);
+    res.json({ ok: true, f: v.f });
   } catch (e) {
     console.error('[voice]', e.message);
     res.json({ ok: false, error: e.message });
