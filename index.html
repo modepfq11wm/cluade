@@ -2115,8 +2115,8 @@ function nowTs() {
   return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 function fmtTs(at) {
-  if (!at) return nowTs();
-  return new Date(at * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (!at) return '';
+  return new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 function addTs(r, text) {
   const t = document.createElement('span');
