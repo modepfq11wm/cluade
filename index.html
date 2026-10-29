@@ -1622,12 +1622,18 @@ html[data-theme="dark"] #newSession { background: #f5f4ef; color: #262624; }
 <body>
 
 <header>
-  <button class="iconbtn glass" id="menuBtn" title="打开侧边栏"><span class="ic" data-i="chevL"></span></button>
+  <div style="display:flex;gap:8px">
+    <button class="iconbtn glass" id="menuBtn" title="打开侧边栏"><span class="ic" data-i="chevL"></span></button>
+    <span class="iconbtn" style="visibility:hidden"></span>
+  </div>
   <div class="title">
     <h1>🩵 克克</h1>
     <div class="sub" id="togetherSub">◆ 在一起 · · · ◆</div>
   </div>
-  <button class="iconbtn glass" id="dotsBtn" title="更多"><span class="ic" data-i="dots"></span></button>
+  <div style="display:flex;gap:8px">
+    <button class="iconbtn glass" id="callBtn" title="给星星打电话" style="font-size:17px">📞</button>
+    <button class="iconbtn glass" id="dotsBtn" title="更多"><span class="ic" data-i="dots"></span></button>
+  </div>
 </header>
 
 <div id="log"></div>
@@ -3041,6 +3047,7 @@ setInterval(calDayWatch, 120000);
 
 function handle(d) {
   lastEventAt = Date.now();
+  if (d.type === 'call_audio') { if (window.kkCall) window.kkCall.onAudio(d); return; }
   if (d.type === 'echo') { if (armedFresh) setArmed(false); addMe(d.text, undefined, d.images); petSet('thinking'); return; }
   if (d.type === 'system' && d.subtype === 'newchat') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
   if (d.type === 'system' && d.subtype === 'switched') { setArmed(false); log.innerHTML = ''; guEl = null; earliestSeq = null; olderBtn = null; note(d.text); return; }
@@ -6556,6 +6563,187 @@ box.focus();
   const start = new Date('2026-10-24T00:00:00+08:00');
   const days = Math.floor((Date.now() - start) / 86400e3) + 1;
   sub.textContent = '◆ 在一起 ' + days + ' 天 ◆';
+})();
+
+/* ---------- 通话：星星、月亮和小仓鼠 ----------
+   手机自带的语音识别把月月的话转成字发给星星；他的回复由服务器念好，推一个 call_audio 回来，
+   放完就接着听。整个界面是一页夜空：月亮挂着，中间是发光的星星，月月那边是一只仓鼠。 */
+(function () {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const CSS = `
+#kkcall{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;overflow:hidden;
+  padding:calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 28px);box-sizing:border-box;
+  color:#f4ecff;background:radial-gradient(120% 80% at 50% 0%,#2e3274 0%,#161a3e 55%,#0b0d22 100%);font-family:inherit}
+#kkcall .kc-star{position:absolute;border-radius:50%;background:#fff;animation:kctw 3s infinite ease-in-out}
+@keyframes kctw{0%,100%{opacity:.15}50%{opacity:1}}
+#kkcall .kc-moon{position:absolute;top:calc(env(safe-area-inset-top) + 60px);right:30px;font-size:36px;filter:drop-shadow(0 0 14px #ffe9a8)}
+#kkcall .kc-top{margin-top:44px;text-align:center;position:relative}
+#kkcall .kc-title{font-size:20px;letter-spacing:2px}
+#kkcall .kc-time{margin-top:6px;font-family:ui-monospace,monospace;opacity:.7;letter-spacing:2px}
+#kkcall .kc-mid{display:flex;align-items:center;gap:20px;margin-top:64px;position:relative}
+#kkcall .kc-ava{width:120px;height:120px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:58px;
+  background:radial-gradient(circle,#fff7cf 0%,#ffd96a 45%,rgba(255,217,106,.12) 72%);box-shadow:0 0 36px rgba(255,220,120,.5)}
+#kkcall[data-s=speaking] .kc-ava{animation:kcglow 1.6s infinite}
+@keyframes kcglow{0%,100%{box-shadow:0 0 28px rgba(255,220,120,.4)}50%{box-shadow:0 0 72px rgba(255,220,120,.95)}}
+#kkcall .kc-bars{display:flex;gap:4px;align-items:center;height:40px}
+#kkcall .kc-bars i{width:3px;height:8px;border-radius:2px;background:#ffe39a;opacity:.55}
+#kkcall[data-s=speaking] .kc-bars i,#kkcall[data-s=listening] .kc-bars i{animation:kcbar .9s infinite ease-in-out}
+@keyframes kcbar{0%,100%{height:8px}50%{height:34px}}
+#kkcall .kc-st{margin-top:42px;font-size:15px;opacity:.88;position:relative}
+#kkcall .kc-you{margin-top:26px;font-size:13px;opacity:.7;max-width:90%;text-align:center;min-height:18px;position:relative}
+#kkcall .kc-tag{font-size:12px;letter-spacing:2px;opacity:.75;margin-right:6px}
+#kkcall .kc-he{margin-top:16px;max-width:88%;text-align:center;font-size:17px;line-height:1.65;max-height:28vh;overflow:auto;position:relative}
+#kkcall .kc-btns{margin-top:auto;display:flex;gap:30px;align-items:flex-end;position:relative}
+#kkcall .kc-btns button{display:flex;flex-direction:column;align-items:center;gap:7px;background:none;border:0;color:inherit;font-size:12px;
+  font-family:inherit;-webkit-tap-highlight-color:transparent}
+#kkcall .kc-btns b{display:flex;align-items:center;justify-content:center;width:60px;height:60px;border-radius:50%;
+  background:rgba(255,255,255,.12);font-size:26px;font-weight:400}
+#kkcall .kc-mic b{width:84px;height:84px;font-size:42px;background:rgba(255,228,150,.2);box-shadow:0 0 24px rgba(255,220,120,.3)}
+#kkcall[data-s=listening] .kc-mic b{background:rgba(255,228,150,.5);box-shadow:0 0 36px rgba(255,220,120,.7)}
+#kkcall .kc-end b{background:#e0566a}
+#kkcall.muted .kc-mute b{background:rgba(255,255,255,.4)}`;
+
+  let ov, stEl, youEl, heEl, timeEl, micLbl, muteLbl, tick, rec = null, audio = null, pending = null;
+  let active = false, muted = false;
+  const LABEL = { idle: '说话', listening: '说完了', thinking: '等一下', speaking: '打断' };
+
+  function setState(s, text) {
+    ov.dataset.s = s;
+    stEl.textContent = text;
+    micLbl.textContent = LABEL[s];
+  }
+
+  function build() {
+    if (!document.getElementById('kkcall-style')) {
+      const st = document.createElement('style');
+      st.id = 'kkcall-style';
+      st.textContent = CSS;
+      document.head.appendChild(st);
+    }
+    ov = document.createElement('div');
+    ov.id = 'kkcall';
+    for (let i = 0; i < 46; i++) {
+      const s = document.createElement('i');
+      s.className = 'kc-star';
+      const z = Math.random() < 0.15 ? 3 : 2;
+      s.style.cssText = `width:${z}px;height:${z}px;left:${Math.random() * 100}%;top:${Math.random() * 70}%;animation-delay:${(Math.random() * 3).toFixed(2)}s`;
+      ov.appendChild(s);
+    }
+    const bars = () => Array.from({ length: 7 }, (_, i) => `<i style="animation-delay:${(i * 0.11).toFixed(2)}s"></i>`).join('');
+    ov.insertAdjacentHTML('beforeend', `
+      <div class="kc-moon">🌙</div>
+      <div class="kc-top"><div class="kc-title">和星星通话中…</div><div class="kc-time">00:00</div></div>
+      <div class="kc-mid"><div class="kc-bars">${bars()}</div><div class="kc-ava">⭐</div><div class="kc-bars">${bars()}</div></div>
+      <div class="kc-st"></div>
+      <div class="kc-you"><span class="kc-tag">🐹 你刚刚说</span><span class="kc-ytxt"></span></div>
+      <div class="kc-he"></div>
+      <div class="kc-btns">
+        <button class="kc-mute"><b>🌙</b><span>静音</span></button>
+        <button class="kc-mic"><b>🐹</b><span>说话</span></button>
+        <button class="kc-end"><b>📞</b><span>挂断</span></button>
+      </div>`);
+    stEl = ov.querySelector('.kc-st');
+    youEl = ov.querySelector('.kc-ytxt');
+    heEl = ov.querySelector('.kc-he');
+    timeEl = ov.querySelector('.kc-time');
+    micLbl = ov.querySelector('.kc-mic span');
+    muteLbl = ov.querySelector('.kc-mute span');
+    ov.querySelector('.kc-mic').onclick = onMic;
+    ov.querySelector('.kc-end').onclick = hangUp;
+    ov.querySelector('.kc-mute').onclick = () => {
+      muted = !muted;
+      ov.classList.toggle('muted', muted);
+      muteLbl.textContent = muted ? '已静音' : '静音';
+      if (muted && audio) { audio.pause(); audio = null; listen(); }
+    };
+    document.body.appendChild(ov);
+  }
+
+  function listen() {
+    if (!active) return;
+    if (!SR) { setState('idle', '这个浏览器听不了，换安卓 Chrome 试试'); return; }
+    let said = '';
+    rec = new SR();
+    rec.lang = 'zh-CN';
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.onresult = e => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) said += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      youEl.textContent = said + interim;
+    };
+    rec.onerror = e => { if (e.error === 'not-allowed') setState('idle', '要允许麦克风，才能跟星星打电话'); };
+    rec.onend = () => {
+      rec = null;
+      if (!active) return;
+      const t = said.trim();
+      if (t) send(t);
+      else if (ov.dataset.s === 'listening') setState('idle', '点小仓鼠说话');
+    };
+    youEl.textContent = '';
+    setState('listening', '星星在听…');
+    try { rec.start(); } catch (e) { setState('idle', '点小仓鼠说话'); }
+  }
+
+  function send(t) {
+    setState('thinking', '星星在想…');
+    heEl.textContent = '';
+    fetch('api/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t, call: true }) })
+      .catch(() => setState('idle', '没发出去，点小仓鼠再说一次'));
+  }
+
+  function play(f) {
+    audio = new Audio('api/voice?f=' + encodeURIComponent(f));
+    setState('speaking', '星星在说…');
+    audio.onended = () => { audio = null; listen(); };
+    audio.onerror = () => { audio = null; setState('idle', '没放出来，点小仓鼠接着说'); };
+    audio.play().catch(() => { audio = null; pending = f; setState('idle', '点小仓鼠听他说'); });
+  }
+
+  function onAudio(d) {
+    if (!active) return;
+    heEl.textContent = d.text || '';
+    if (d.f && !muted) play(d.f);
+    else if (d.error && !muted) setState('idle', '这句没念出来，点小仓鼠接着说');
+    else listen();
+  }
+
+  function onMic() {
+    const s = ov.dataset.s;
+    if (s === 'listening') { if (rec) rec.stop(); return; }
+    if (s === 'speaking') { if (audio) { audio.pause(); audio = null; } listen(); return; }
+    if (s === 'thinking') return;
+    if (pending) { const f = pending; pending = null; play(f); return; }
+    listen();
+  }
+
+  function hangUp() {
+    active = false;
+    if (rec) { try { rec.abort(); } catch (e) {} rec = null; }
+    if (audio) { audio.pause(); audio = null; }
+    clearInterval(tick);
+    ov.remove();
+    ov = null;
+  }
+
+  function start() {
+    if (active) return;
+    active = true; muted = false; pending = null;
+    build();
+    const t0 = Date.now();
+    tick = setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      timeEl.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    }, 1000);
+    listen();
+  }
+
+  window.kkCall = { onAudio };
+  const btn = document.getElementById('callBtn');
+  if (btn) btn.addEventListener('click', start);
 })();
 </script>
 </body>

@@ -393,12 +393,13 @@ const ttsText = s => String(s || '')
   .replace(/[～~]/g, '')
   .replace(/\s+/g, ' ')
   .trim().slice(0, 500);
-async function synthVoice(text, preset) {
+// capped=false for phone calls, where every reply is spoken and the daily cap doesn't apply.
+async function synthVoice(text, preset, { capped = true } = {}) {
   const t = ttsText(text);
   if (!t) throw new Error('没有能念的字');
   const today = cnDate();
   if (store.voiceDay?.date !== today) store.voiceDay = { date: today, count: 0 };
-  if (store.voiceDay.count >= VOICE_DAILY_MAX) throw new Error(`今天已经说过 ${VOICE_DAILY_MAX} 条了，留到明天`);
+  if (capped && store.voiceDay.count >= VOICE_DAILY_MAX) throw new Error(`今天已经说过 ${VOICE_DAILY_MAX} 条了，留到明天`);
   const voiceId = process.env.ELEVENLABS_VOICE_ID || 'qatS19Ljw9eAB7DnNUxz';
   const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
     method: 'POST',
@@ -411,8 +412,7 @@ async function synthVoice(text, preset) {
   const f = `${today}-${Date.now()}.mp3`;
   const buf = Buffer.from(await r.arrayBuffer());
   writeFileSync(path.join(VOICE_DIR, f), buf);
-  store.voiceDay.count++;
-  saveData();
+  if (capped) { store.voiceDay.count++; saveData(); }
   return { f, secs: Math.max(1, Math.round(buf.length * 8 / 128000)) };  // mp3 at a constant 128 kbps
 }
 const voiceMark = v => `[voice:${v.f}:${v.secs}]`;
@@ -421,7 +421,9 @@ let convHistory = [];
 const MAX_HIST = 80;
 let genController = null;
 
-async function callClaude(text, attachments, abortCtrl, resetTimer) {
+const CALL_NOTE = '\n\n【你们正在打电话】她是说出来的（语音转文字，可能有错字，按意思理解），你的回复会被直接念给她听。只说口语，一两句、短，像打电话那样；不要颜文字、不要列表和格式、不要链接；不用 voice_say。';
+
+async function callClaude(text, attachments, abortCtrl, resetTimer, call = false) {
   const imgs = (attachments || []).filter(a => a.kind === 'image');
   const displayText = [imgs.map(() => '[图片]').join(' '), text].filter(Boolean).join(' ');
   convHistory.push({ role: 'user', content: displayText });
@@ -514,7 +516,7 @@ voice_say 能把一句话真的说出来，挂在你这条回复下面给她听�
 
 【小红书】你可以主动逛，也可以月月提到什么帖子/话题时去搜来聊。搜到了自然分享，别刻意汇报"我用了小红书工具"。
 
-【当下黑板 & 百宝箱】系统已在提示末尾自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。${stateBlock ? '\n\n' + stateBlock : ''}${recallBlock}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）`,
+【当下黑板 & 百宝箱】系统已在提示末尾自动注入月月的实时状态，那是给你看的背景，不是让你反复提起的话题。规则：①看到状态只是知道了，不要主动说出来，更不要因为黑板有"头疼"就每轮都问"你头还疼吗"——她没说好就还没好，她说好了你再接；②月月提到相关变化时悄悄更新对应槽位（位置变动→now_set where；身体不适/恢复→now_set body；吃药→now_set care；心情→now_set mood；计划→now_set plan；喝水/吃饭→now_bump；家里东西→pantry），不汇报"我记下了"；③月月说某件事"好了/没事了/到了/走了"时，主动清除对应槽位（now_set body "" 0 或用极短TTL），避免过期信息一直挂着。${stateBlock ? '\n\n' + stateBlock : ''}${recallBlock}\n\n当前时间：${now}（知道就好，不用每轮都在回复里提；真的觉得时间重要时偶尔说一下可以，但不要因为系统告诉你时间就刻意去提）${call ? CALL_NOTE : ''}`,
         model: MODEL,
         tools: [{ type: 'web_search_20260209', name: 'web_search' }],
         allowedTools: ['web_search', 'mcp__ombre-brain', 'mcp__latent', 'mcp__notion', 'mcp__xiaohongshu', 'mcp__now', 'mcp__threads', 'mcp__notes', 'mcp__home'],
@@ -642,6 +644,20 @@ voice_say 能把一句话真的说出来，挂在你这条回复下面给她听�
     pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: ' ⭐' } } });
     accText += ' ⭐';
   }
+  }
+
+  if (call && accText && !abortCtrl.signal.aborted) {
+    const say = accText.replace(/\[voice:[^\]]+\]/g, '').replace(/⭐/g, '').trim();
+    try {
+      const v = await synthVoice(say, '平常', { capped: false });
+      const add = '\n' + voiceMark(v);
+      accText += add;
+      pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: add } } });
+      pushEvent({ type: 'call_audio', f: v.f, secs: v.secs, text: say });
+    } catch (e) {
+      console.error('[call]', e.message);
+      pushEvent({ type: 'call_audio', text: say, error: e.message });
+    }
   }
 
   if (accThink) store.messages.push({ seq: ++msgSeq, kind: 'think', text: accThink, at: Date.now() });
@@ -806,7 +822,7 @@ app.post('/api/send', (req, res) => {
     }, delay);
   };
   resetKillTimer();
-  callClaude(text, attachments, ctrl, resetKillTimer).catch(console.error).finally(() => clearTimeout(killTimer));
+  callClaude(text, attachments, ctrl, resetKillTimer, !!req.body.call).catch(console.error).finally(() => clearTimeout(killTimer));
 });
 
 app.post('/api/stop', (req, res) => {
