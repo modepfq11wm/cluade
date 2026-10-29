@@ -1,7 +1,7 @@
 // semantic.js — WrenWen-style semantic memory recall via SiliconFlow BAAI/bge-m3
 // Reads the latent corpus, builds embeddings, injects a recall block per turn.
 // Disabled silently if SILICONFLOW_API_KEY is not set.
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, watch } from 'fs';
 import path from 'path';
 
 const SF_URL   = 'https://api.siliconflow.cn/v1/embeddings';
@@ -71,6 +71,24 @@ export async function updateIndex() {
     }
   }
   if (changed) saveCache();
+}
+
+/**
+ * Watch the corpus directory for new/changed files (grow/hold memories written mid-conversation).
+ * Triggers updateIndex() with a 3s debounce so rapid writes don't spam the API.
+ */
+export function watchCorpus() {
+  if (!process.env.SILICONFLOW_API_KEY) return;
+  if (!existsSync(CORPUS_DIR)) return;
+  let timer = null;
+  watch(CORPUS_DIR, (_, filename) => {
+    if (!filename?.endsWith('.txt')) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      updateIndex().catch(e => console.warn('[semantic] watch update failed:', e.message));
+    }, 3000);
+  });
+  console.log('[semantic] watching', CORPUS_DIR);
 }
 
 /**

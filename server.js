@@ -1,6 +1,6 @@
 import express from 'express';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { recall, updateIndex } from './semantic.js';
+import { recall, updateIndex, watchCorpus } from './semantic.js';
 import { homedir } from 'os';
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -894,4 +894,5 @@ app.get('/api/events', (req, res) => {
 app.listen(PORT, () => {
   console.log('kk-chat :', PORT);
   updateIndex().catch(e => console.warn('[semantic] startup index failed:', e.message));
+  watchCorpus();
 });
