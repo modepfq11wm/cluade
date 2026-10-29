@@ -162,6 +162,16 @@ async function isXhsAlive() {
 // Chat bubbles, not essays: collapse blank lines between paragraphs, except inside ``` code fences.
 const tightenParas = s => s.split(/(```[\s\S]*?```)/).map((p, i) => (i % 2 ? p : p.replace(/\n{2,}/g, '\n'))).join('');
 
+// Share of `next`'s character pairs already present in `said` — catches the same goodbye said again after a tool call.
+function repeatRatio(said, next) {
+  const grams = s => { const t = s.replace(/[\s\p{P}\p{S}]/gu, ''); const g = new Set(); for (let i = 0; i < t.length - 1; i++) g.add(t.slice(i, i + 2)); return g; };
+  const A = grams(said), B = grams(next);
+  if (B.size === 0) return 1;
+  let hit = 0;
+  for (const x of B) if (A.has(x)) hit++;
+  return hit / B.size;
+}
+
 function lastHerAt() {
   for (let i = store.messages.length - 1; i >= 0; i--) {
     if (store.messages[i].kind === 'me') return store.messages[i].at;
@@ -478,7 +488,9 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
             pushEvent({ type: 'stream_event', event: { delta: { type: 'thinking_delta', thinking: block.thinking } } });
           } else if (block.type === 'text' && block.text) {
             let newText = tightenParas(block.text);
-            if (!accText.endsWith(newText)) {
+            if (accText && repeatRatio(accText, newText) > 0.6) {
+              console.log('[dedupe] dropped repeated text block');
+            } else if (!accText.endsWith(newText)) {
               // Text before and after a tool call arrives as separate blocks; keep them on separate lines.
               if (accText && !accText.endsWith('\n') && !newText.startsWith('\n')) newText = '\n' + newText;
               accText += newText;
