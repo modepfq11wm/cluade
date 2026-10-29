@@ -2297,11 +2297,13 @@ function toastSplit(text) {
 const IMG_RE = /!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s"'<>]+?\.(?:png|jpe?g|gif|webp)(?:\?[^\s"'<>]*)?)/gi;
 const H_RE = /^(#{1,3})\s+(.*)$/;
 /* 行内的重音：**粗** `码` ~~划掉~~。全用 createElement 拼，不碰 innerHTML */
-const INLINE_RE = /\*\*([^\n]+?)\*\*|`([^`\n]+?)`|~~([^\n]+?)~~/g;
+// `(?!‹)`: the backtick inside 克克's jealous kaomoji (›´ω`‹ ) is not a code mark
+const INLINE_RE = /\*\*([^\n]+?)\*\*|`(?!‹)([^`\n]+?)`|~~([^\n]+?)~~/g;
 function appendInline(el, text, streaming) {
   let tail = null;
   if (streaming) {
-    const marks = [['**', 'strong'], ['`', 'code'], ['~~', 's']];
+    // No '`' here: a lone backtick (often from a kaomoji) would turn the whole rest of the message into code.
+    const marks = [['**', 'strong'], ['~~', 's']];
     for (const [mk, tag] of marks) {
       const n = text.split(mk).length - 1;
       if (n % 2) {
