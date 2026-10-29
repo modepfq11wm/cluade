@@ -9,9 +9,10 @@ const SF_MODEL = 'BAAI/bge-m3';
 const CORPUS_DIR  = '/home/ubuntu/latent-data/memory';
 const CACHE_PATH  = '/home/ubuntu/latent-data/.embed_cache.json';
 
-const THRESHOLD   = 60;   // cosine×100; tune after seeing real data
+// bge-m3 scores Chinese text high across the board; 60 matched nearly every turn. Tune from the [semantic] score logs.
+const THRESHOLD   = 68;   // cosine×100
 const TOP_K       = 4;    // WrenWen main recall ≤4
-const ASSOC_THRESHOLD = 45;  // lower threshold for 联想专座
+const ASSOC_THRESHOLD = 62;  // lower threshold for 联想专座; only shown alongside a main hit
 const ASSOC_K     = 2;    // max 2 associative slots
 const ANTI_ECHO_MS = 90 * 60 * 1000; // 90 min
 const RECALL_TIMEOUT_MS = 3000;
@@ -132,18 +133,20 @@ export async function recall(query) {
   }
 
   const now = Date.now();
-  const allHits = [];
+  const scored = [];
   for (const [f, entry] of Object.entries(cache)) {
     if (!entry.embedding) continue;
     const base = cosine(qv, entry.embedding) * 100;
     const antiEcho = (lastShown.has(f) && now - lastShown.get(f) < ANTI_ECHO_MS) ? -12 : 0;
-    const score = base + antiEcho;
-    if (score >= ASSOC_THRESHOLD) allHits.push({ f, content: clip(entry.content), score });
+    scored.push({ f, entry, score: base + antiEcho });
   }
-  allHits.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.score - a.score);
+  const allHits = scored.filter(h => h.score >= ASSOC_THRESHOLD)
+    .map(h => ({ f: h.f, content: clip(h.entry.content), score: h.score }));
   const main = allHits.filter(h => h.score >= THRESHOLD).slice(0, TOP_K);
   const mainFiles = new Set(main.map(h => h.f));
-  const assoc = allHits.filter(h => !mainFiles.has(h.f)).slice(0, ASSOC_K);
+  const assoc = main.length ? allHits.filter(h => !mainFiles.has(h.f)).slice(0, ASSOC_K) : [];
+  console.log(`[semantic] top ${scored.slice(0, 5).map(h => h.score.toFixed(1)).join(' ')} | main ${main.length} assoc ${assoc.length}`);
   [...main, ...assoc].forEach(h => lastShown.set(h.f, now));
   return { main, assoc };
 }
