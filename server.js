@@ -1,7 +1,6 @@
 import express from 'express';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { recall, updateIndex, watchCorpus } from './semantic.js';
-import { homedir } from 'os';
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { createHash, timingSafeEqual } from 'crypto';
@@ -314,86 +313,8 @@ function pushEvent(ev) {
 
 // ---------- 对话状态 ----------
 let convHistory = [];
-let visionCarry = [];  // vision replies bypass the SDK session; replay them into the next session turn
 const MAX_HIST = 80;
 let genController = null;
-
-async function callVision(text, imgs, abortCtrl) {
-  console.log('[vision] start, imgs:', imgs.length);
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  let authHeader = {};
-  if (apiKey) {
-    authHeader = { 'x-api-key': apiKey };
-  } else {
-    const paths = [path.join(homedir(), '.claude', '.credentials.json'), '/home/ubuntu/.claude/.credentials.json'];
-    console.log('[vision] checking paths:', paths.join(', '));
-    for (const cp of paths) {
-      const exists = existsSync(cp);
-      console.log('[vision]', cp, exists ? 'exists' : 'missing');
-      if (exists) {
-        try {
-          const creds = JSON.parse(readFileSync(cp, 'utf8'));
-          // Recursively find any long string token in a possibly-nested object
-          const findTok = (obj, depth = 0) => {
-            if (depth > 3) return null;
-            if (typeof obj === 'string' && obj.length > 20) return obj;
-            if (obj && typeof obj === 'object') {
-              const preferred = ['accessToken', 'token', 'access_token', 'claudeAiOauth', 'mcpOAuth'];
-              for (const k of preferred) {
-                if (obj[k]) { const r = findTok(obj[k], depth + 1); if (r) return r; }
-              }
-              for (const v of Object.values(obj)) {
-                const r = findTok(v, depth + 1);
-                if (r) return r;
-              }
-            }
-            return null;
-          };
-          const tok = findTok(creds);
-          if (tok) {
-            // sk-ant-oat = OAuth Access Token → Bearer; sk-ant-api = API key → x-api-key
-            authHeader = tok.startsWith('sk-ant-oat')
-              ? { Authorization: `Bearer ${tok}` }
-              : tok.startsWith('sk-ant-api') || tok.startsWith('sk-')
-                ? { 'x-api-key': tok }
-                : { Authorization: `Bearer ${tok}` };
-            break;
-          } else {
-            console.log('[vision] no token found in', cp);
-          }
-        } catch (e) { console.error('[vision] parse error:', e.message); }
-      }
-    }
-  }
-  if (!Object.keys(authHeader).length) return null;
-
-  const content = [
-    ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } })),
-    ...(text ? [{ type: 'text', text }] : []),
-  ];
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { ...authHeader, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM + SHARED_LANG, messages: [{ role: 'user', content }] }),
-        signal: abortCtrl.signal,
-      });
-      if (res.status === 429) {
-        console.log('[vision] 429 rate limit, retry', attempt + 1);
-        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-        continue;
-      }
-      if (!res.ok) { console.error('[vision]', res.status, await res.text()); return null; }
-      const data = await res.json();
-      return data.content?.find(b => b.type === 'text')?.text || null;
-    } catch (e) {
-      if (e.name !== 'AbortError') console.error('[vision]', e.message);
-      return null;
-    }
-  }
-  return null;
-}
 
 async function callClaude(text, attachments, abortCtrl, resetTimer) {
   const imgs = (attachments || []).filter(a => a.kind === 'image');
@@ -406,30 +327,23 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
 
   let accText = '', accThink = '', memStored = false;
 
-  let visionDone = false;
-  if (imgs.length > 0) {
-    const vr = await callVision(text, imgs, abortCtrl);
-    if (vr) {
-      visionDone = true;
-      accText = tightenParas(vr);
-      visionCarry.push(`月月发了${imgs.length}张图${text ? '，说：' + text : ''}；你看图后回复：${vr.slice(0, 600)}`);
-      if (visionCarry.length > 5) visionCarry = visionCarry.slice(-5);
-      const chunks = accText.match(/[^\s]*\s*/g) || [accText];
-      for (const chunk of chunks) {
-        if (!chunk || abortCtrl.signal.aborted) continue;
-        pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: chunk } } });
-        await new Promise(r => setImmediate(r));
-      }
-    }
-  }
-  if (!visionDone) {
-  let queryPrompt = imgs.length > 0
-    ? [text, `[月月发了${imgs.length}张图片，你看不到内容，自然回应一下]`].filter(Boolean).join('\n')
+  {
+  // Images go into the same session as a streaming-input user message, so 星星 sees them and remembers them.
+  const queryPrompt = imgs.length > 0
+    ? (async function* () {
+        yield {
+          type: 'user',
+          parent_tool_use_id: null,
+          message: {
+            role: 'user',
+            content: [
+              ...imgs.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } })),
+              { type: 'text', text: text || '（月月发了图片）' },
+            ],
+          },
+        };
+      })()
     : text;
-  if (visionCarry.length) {
-    queryPrompt = `（前面月月发过图，你看图回过她，当时的内容如下，接着聊就好，不用复述）\n${visionCarry.join('\n')}\n\n${queryPrompt}`;
-    visionCarry = [];
-  }
   const MEM_TOOLS = new Set(['breath', 'anchor', 'hold', 'grow', 'dream', 'feel', 'trace']);
   try {
     const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
@@ -453,9 +367,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
       } catch { /* don't block chat on semantic errors */ }
     }
 
-    for await (const ev of query({
-      prompt: queryPrompt,
-      options: {
+    const options = {
         abortController: abortCtrl,
         resume: store.kkSessionId || undefined,
         // Static content first, per-turn content last, so the long static prefix can be prompt-cached.
@@ -531,8 +443,9 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
           },
         },
         skills: [],
-      },
-    })) {
+      };
+    const consume = async (prompt) => {
+    for await (const ev of query({ prompt, options })) {
       if (abortCtrl.signal.aborted) break;
       if (resetTimer) resetTimer();
 
@@ -562,6 +475,14 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
         }
       }
     }
+    };
+    try {
+      await consume(queryPrompt);
+    } catch (e) {
+      if (!imgs.length || accText || e.name === 'AbortError') throw e;
+      console.warn('[image] sending image failed, falling back to text:', e.message);
+      await consume([text, `[月月发了${imgs.length}张图片，但这次没传过来，你看不到，自然回应一下]`].filter(Boolean).join('\n'));
+    }
   } catch (e) {
     if (e.name !== 'AbortError') {
       console.error('Claude error:', e.message);
@@ -576,7 +497,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     pushEvent({ type: 'stream_event', event: { delta: { type: 'text_delta', text: ' ⭐' } } });
     accText += ' ⭐';
   }
-  } // end !visionDone
+  }
 
   if (accThink) store.messages.push({ seq: ++msgSeq, kind: 'think', text: accThink, at: Date.now() });
   if (accText) {
