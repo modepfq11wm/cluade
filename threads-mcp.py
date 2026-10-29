@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""线卷 MCP Server — roleplay 故事线状态管理"""
+"""线卷 MCP Server — 跨对话的持续话题状态（考研进展、在画的图、没说完的计划）"""
 import json, os, sys
 from pathlib import Path
 from datetime import datetime
@@ -17,12 +17,12 @@ def save(threads):
 TOOLS = [
     {
         "name": "thread_list",
-        "description": "列出所有故事线卷（ID、名称、最后更新时间）",
+        "description": "列出所有持续话题线（ID、名称、最后更新时间）",
         "inputSchema": {"type": "object", "properties": {}, "required": []}
     },
     {
         "name": "thread_get",
-        "description": "读取一条故事线的完整状态（角色表、当前进度、关键转折点）。月月说"继续XX"或提到故事角色时先调这个。",
+        "description": "读取一条话题线的完整状态（相关的人、现在到哪了、关键节点）。月月提到之前聊过的事有了后续时先调这个。",
         "inputSchema": {
             "type": "object",
             "properties": {"id": {"type": "string", "description": "线卷 ID"}},
@@ -31,14 +31,14 @@ TOOLS = [
     },
     {
         "name": "thread_save",
-        "description": "创建或更新一条故事线卷。故事有实质推进（不是每句话，是走了一段）时调一次。",
+        "description": "创建或更新一条话题线。事情有实质进展/结果/转折时调一次，不是每句话都调。",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "id":         {"type": "string", "description": "线卷 ID，英文短标识，如 meigao_fen1"},
-                "name":       {"type": "string", "description": "故事名称，中文可读，如"美高·封一""},
-                "characters": {"type": "string", "description": "角色表：姓名、关系、主要特征"},
-                "state":      {"type": "string", "description": "当前状态：故事走到哪里，下次继续的起点"},
+                "id":         {"type": "string", "description": "线卷 ID，英文短标识，如 kaoyan"},
+                "name":       {"type": "string", "description": "话题名称，中文可读，如「考研」"},
+                "characters": {"type": "string", "description": "涉及的人（可选）"},
+                "state":      {"type": "string", "description": "现在到哪里了，下次接着聊的起点"},
                 "moments":    {"type": "string", "description": "关键转折点（追加新条目，不要删旧的）"}
             },
             "required": ["id", "name", "state"]

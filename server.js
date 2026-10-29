@@ -534,7 +534,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     pushEvent({ type: 'context_warn', used: histLen, max: MAX_HIST });
   }
 
-  genController = null;
+  if (genController === abortCtrl) genController = null;
 }
 
 // ---------- Express ----------
