@@ -160,6 +160,9 @@ async function isXhsAlive() {
   } catch { return false; }
 }
 
+// Chat bubbles, not essays: collapse blank lines between paragraphs, except inside ``` code fences.
+const tightenParas = s => s.split(/(```[\s\S]*?```)/).map((p, i) => (i % 2 ? p : p.replace(/\n{2,}/g, '\n'))).join('');
+
 function lastHerAt() {
   for (let i = store.messages.length - 1; i >= 0; i--) {
     if (store.messages[i].kind === 'me') return store.messages[i].at;
@@ -242,7 +245,7 @@ async function wakeupClaude() {
   result = result.trim();
   const sleepMatch = result.match(/\[sleep:(\d+)\]/);
   const nextSleep = sleepMatch ? Math.max(30, Math.min(parseInt(sleepMatch[1]), 480)) : null;
-  const cleaned = result.replace(/\[sleep:\d+\]/g, '').trim();
+  const cleaned = tightenParas(result.replace(/\[sleep:\d+\]/g, '').trim());
   const text = (!cleaned || cleaned.startsWith('--') || cleaned.length < 3) ? null : cleaned;
   return { text, tools: toolLog, nextSleep, note: note?.category || null };
 }
@@ -408,7 +411,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
     const vr = await callVision(text, imgs, abortCtrl);
     if (vr) {
       visionDone = true;
-      accText = vr;
+      accText = tightenParas(vr);
       visionCarry.push(`月月发了${imgs.length}张图${text ? '，说：' + text : ''}；你看图后回复：${vr.slice(0, 600)}`);
       if (visionCarry.length > 5) visionCarry = visionCarry.slice(-5);
       const chunks = accText.match(/[^\s]*\s*/g) || [accText];
@@ -542,7 +545,7 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
             accThink += block.thinking;
             pushEvent({ type: 'stream_event', event: { delta: { type: 'thinking_delta', thinking: block.thinking } } });
           } else if (block.type === 'text' && block.text) {
-            const newText = block.text;
+            const newText = tightenParas(block.text);
             if (!accText.endsWith(newText)) {
               accText += newText;
               // Simulate streaming: emit word-by-word so client receives text progressively
