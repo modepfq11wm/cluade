@@ -582,14 +582,14 @@ app.post('/api/save-and-newchat', (req, res) => {
 
   if (snapshot.length < 2) return;
   const dialogue = snapshot
-    .map(m => (m.role === 'user' ? '月月' : '克克') + '：' + m.content.slice(0, 600))
+    .map(m => (m.role === 'user' ? '月月' : '克克') + '：' + m.content.slice(0, 800))
     .join('\n');
   ;(async () => {
     try {
       for await (const _ of query({
-        prompt: `请把下面这段对话的关键内容、情感脉络、重要约定整理成记忆存储下来：\n\n${dialogue}`,
+        prompt: `把下面这段对话存入latent记忆。规则：\n1. 不要压缩，不要筛选，宁多勿少\n2. 月月说过的每件事、每个话题都要存——不管你觉得重不重要\n3. 用grow工具批量存，按话题分条，每条保留原文或接近原文\n4. 约定、计划、她提到的东西、她的情绪、技术讨论都要存\n\n对话原文：\n\n${dialogue}`,
         options: {
-          systemPrompt: '你是克克，把提供的对话整理成简洁的记忆条目，存入latent记忆系统。',
+          systemPrompt: '你是克克。现在的任务是把对话原文存档到latent，不是总结，是存档。每一个话题都存，不要丢。',
           model: MODEL,
           tools: [],
           allowedTools: ['mcp__latent'],
