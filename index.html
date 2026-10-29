@@ -2132,7 +2132,7 @@ function addMe(text, ts, images) {
     images.forEach(img => {
       const el = document.createElement('img');
       el.className = 'chatimg';
-      el.src = 'data:' + img.media_type + ';base64,' + img.data;
+      el.src = typeof img === 'string' ? img : 'data:' + img.media_type + ';base64,' + img.data;
       b.appendChild(el);
     });
     if (text) { const t = document.createElement('div'); t.textContent = text; b.appendChild(t); }
@@ -2828,7 +2828,7 @@ toolBack.onclick = () => {
 function renderSaid(msgs) {
   for (const m of msgs) {
     const ts = fmtTs(m.at);
-    if (m.kind === 'me') { endThink(); addMe(m.text, ts); }
+    if (m.kind === 'me') { endThink(); addMe(m.images ? m.text.replace(/^(\[图片\]\s*)+/, '') : m.text, ts, m.images); }
     else if (m.kind === 'gu') {
       endThink();                    // 该说正文了，思考那段收工
       const el = ensureGu(ts);

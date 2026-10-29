@@ -1,7 +1,7 @@
 import express from 'express';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { recall, updateIndex, watchCorpus } from './semantic.js';
-import { createReadStream, existsSync, readFileSync, writeFileSync } from 'fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { createHash, timingSafeEqual } from 'crypto';
 import path from 'path';
@@ -312,6 +312,24 @@ function pushEvent(ev) {
 }
 
 // ---------- 对话状态 ----------
+// Images 月月 sends are kept on disk so they still show after a reload; served behind the login.
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const IMG_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+function saveUploads(imgs) {
+  const out = [];
+  imgs.forEach((img, i) => {
+    const ext = IMG_EXT[img.media_type];
+    if (!ext || typeof img.data !== 'string') return;
+    const name = `${Date.now()}-${i}.${ext}`;
+    try {
+      mkdirSync(UPLOAD_DIR, { recursive: true });
+      writeFileSync(path.join(UPLOAD_DIR, name), Buffer.from(img.data, 'base64'));
+      out.push('uploads/' + name);
+    } catch (e) { console.error('[upload]', e.message); }
+  });
+  return out;
+}
+
 let convHistory = [];
 const MAX_HIST = 80;
 let genController = null;
@@ -322,7 +340,8 @@ async function callClaude(text, attachments, abortCtrl, resetTimer) {
   convHistory.push({ role: 'user', content: displayText });
   if (convHistory.length > MAX_HIST) convHistory = convHistory.slice(-MAX_HIST);
 
-  store.messages.push({ seq: ++msgSeq, kind: 'me', text: displayText, at: Date.now() });
+  const saved = saveUploads(imgs);
+  store.messages.push({ seq: ++msgSeq, kind: 'me', text: displayText, at: Date.now(), ...(saved.length ? { images: saved } : {}) });
   saveData();
 
   let accText = '', accThink = '', memStored = false;
@@ -579,6 +598,7 @@ app.use((req, res, next) => {
   if (req.path !== '/') return res.status(401).json({ ok: false, reason: 'auth' });
   res.redirect('login');
 });
+app.use('/uploads', express.static(UPLOAD_DIR));
 app.get('/', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'index.html'));
