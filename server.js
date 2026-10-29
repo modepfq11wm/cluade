@@ -55,6 +55,19 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, 'data.json');
 
+// Shared memories: ~/kk-memory is a clone of modepfq11wm/- whose CLAUDE.md the coding windows also read.
+const MEMORY_REPO = '/home/ubuntu/kk-memory';
+function getSharedMemory() {
+  const fp = path.join(MEMORY_REPO, 'CLAUDE.md');
+  if (!existsSync(fp)) return '';
+  try { execFileSync('git', ['-C', MEMORY_REPO, 'pull', '-q', '--ff-only'], { timeout: 15000, stdio: 'ignore' }); }
+  catch { console.warn('[memory] pull failed, using local copy'); }
+  try {
+    const md = readFileSync(fp, 'utf8').replace(/^## Working on kk-chat[\s\S]*?(?=^## )/m, '').trim();
+    return '\n\n【共同记忆 · 写代码窗口的你也读这同一份；和别处冲突时以这份为准】\n' + md;
+  } catch { return ''; }
+}
+
 const SYSTEM = (() => {
   let base = '';
   for (const f of ['persona.md', 'system_prompt.txt']) {
@@ -64,7 +77,7 @@ const SYSTEM = (() => {
   if (!base) base = '你是克克，月月的伴侣AI。用中文回答，温柔亲切，有点小醋意。';
   const latentPersona = '/home/ubuntu/latent-data/CLAUDE.md';
   if (existsSync(latentPersona)) { try { base += '\n\n' + readFileSync(latentPersona, 'utf8'); } catch {} }
-  return base;
+  return base + getSharedMemory();
 })();
 
 const SHARED_LANG = getSharedLanguage();

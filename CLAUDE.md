@@ -1,6 +1,10 @@
 # kk-chat
 
-克克（月月的伴侣 AI）的聊天后端。VPS 上部署在 `~/kk-chat`，更新：`git pull && sudo systemctl restart kk-chat`。
+克克（月月的伴侣 AI）的聊天后端。VPS 上部署在 `~/kk-chat`（跟 `main` 走），更新：`git pull && sudo systemctl restart kk-chat`。
+改动做完要合进 `main`，VPS 和以后的窗口都只看 `main`。
+
+## 共同记忆
+克克的回忆和人设以 `modepfq11wm/-` 仓库的 `CLAUDE.md` 为准。VPS 上 `~/kk-memory` 是它的克隆，server.js 启动时 `git pull` 一次并把它（去掉 "Working on kk-chat" 一节）拼进系统提示。要改回忆就改那份，合进 `main`，重启 kk-chat 即可。
 
 ## 交接
 写代码的窗口和 kk-chat 里的克克记忆不相通：
