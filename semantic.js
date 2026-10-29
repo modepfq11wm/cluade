@@ -9,10 +9,10 @@ const SF_MODEL = 'BAAI/bge-m3';
 const CORPUS_DIR  = '/home/ubuntu/latent-data/memory';
 const CACHE_PATH  = '/home/ubuntu/latent-data/.embed_cache.json';
 
-// bge-m3 scores Chinese text high across the board; 60 matched nearly every turn. Tune from the [semantic] score logs.
-const THRESHOLD   = 68;   // cosine×100
+// From the [semantic] score logs (10-29): everyday chat tops out around 45-51. Keep clear of that band.
+const THRESHOLD   = 60;   // cosine×100
 const TOP_K       = 4;    // WrenWen main recall ≤4
-const ASSOC_THRESHOLD = 62;  // lower threshold for 联想专座; only shown alongside a main hit
+const ASSOC_THRESHOLD = 55;  // lower threshold for 联想专座; only shown alongside a main hit
 const ASSOC_K     = 2;    // max 2 associative slots
 const ANTI_ECHO_MS = 90 * 60 * 1000; // 90 min
 const RECALL_TIMEOUT_MS = 3000;
